@@ -1,16 +1,6 @@
 #!/usr/bin/env python3
-"""
-LSMI - Generador completo · Temporada 2026
-Ejecutar: python generar_datos.py
-Archivos necesarios en la misma carpeta:
-  - LSMI_1era_Division_Vxx.xlsx
-  - LSMI_2da_Division_Vxx.xlsx
-  - LSMI_3era_Division_1_Vxx.xlsx
-  - LSMI_3era_Division_2_Vxx.xlsx
-  - LSMI_Torneo_vx_Fase_x.xlsx  (posiciones y resultados)
-  - sancionados_san_miguel_ibarra.xlsx
-"""
-import openpyxl, json, sys, os, unicodedata
+"""LSMI - Generador completo v5 · Temporada 2026"""
+import openpyxl, json, sys, os, unicodedata, base64
 from datetime import datetime
 
 def norm(s):
@@ -20,12 +10,20 @@ HOJAS_POS = {
     '1era División':'1era División','2da División':'2da División',
     '3era División C1':'3era División 1','3era División C2':'3era División 2',
 }
-DIV_RES = {
-    '1era División':'1era División','2da División':'2da División',
-    '3era División C1':'3era División 1','3era División C2':'3era División 2',
+DIV_RES = {v:k for k,v in HOJAS_POS.items()}
+
+# Zonas de riesgo por división (últimos N puestos)
+DIV_RIESGO = {
+    '1era División': 4,
+    '2da División': 2,
+    '3era División C1': 4,
+    '3era División C2': 4,
+}
+DIV_CLASSIFY = {
+    '1era División': 8,'2da División': 8,
+    '3era División C1': 8,'3era División C2': 8,
 }
 
-# ── ESTADÍSTICAS ──────────────────────────────────────────────────────────────
 def procesar_stats(ruta):
     wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
     ws_g = wb['GOLEADORES']
@@ -70,9 +68,9 @@ def procesar_stats(ruta):
         'globalData':{'top_10_goleadores':all_s[:10],'top_10_amonestados':[{k:v for k,v in c.items() if k!='_p'} for c in all_c[:10]],'fair_play':fp},
         'teamsData':teams_data,
         '_goles_raw':{f"{e}||{j}":g for (e,j),g in goles_pj.items()},
-        '_tarjetas_raw':{f"{e}||{j}":t for (e,j),t in tarj_pj.items()}}
+        '_tarjetas_raw':{f"{e}||{j}":t for (e,j),t in tarj_pj.items()},
+        '_teams_tarj':teams_data}
 
-# ── POSICIONES ────────────────────────────────────────────────────────────────
 def leer_posiciones(wb_pos):
     pos={}
     for div,hoja in HOJAS_POS.items():
@@ -89,7 +87,6 @@ def leer_posiciones(wb_pos):
         pos[div]=tabla
     return pos
 
-# ── RESULTADOS ────────────────────────────────────────────────────────────────
 def leer_resultados(wb_pos):
     ws_r=wb_pos['RESULTADOS']; res={}
     for row in ws_r.iter_rows(min_row=2, values_only=True):
@@ -98,16 +95,12 @@ def leer_resultados(wb_pos):
         fecha=int(row[0]); div_raw=str(row[1]).strip() if row[1] else ''
         local=str(row[2]).strip(); gf=int(row[3] or 0); gv=int(row[4] or 0); vis=str(row[5]).strip()
         if not div_raw or not local or not vis: continue
-        div_nombre=None
-        for k,v in DIV_RES.items():
-            if v==div_raw: div_nombre=k; break
-        if not div_nombre: div_nombre=div_raw
+        div_nombre=DIV_RES.get(div_raw, div_raw)
         if div_nombre not in res: res[div_nombre]={}
         if fecha not in res[div_nombre]: res[div_nombre][fecha]=[]
         res[div_nombre][fecha].append({'local':local,'gl':gf,'gv':gv,'visitante':vis})
     return {div:[{'fecha':f,'partidos':ps} for f,ps in sorted(fechas.items(),reverse=True)] for div,fechas in res.items()}
 
-# ── SANCIONADOS ───────────────────────────────────────────────────────────────
 def leer_sancionados(ruta):
     DIV_MAP={norm('1era DIVISIÓN'):'1era División',norm('2da DIVISIÓN'):'2da División',
         norm('3era DIVISIÓN 1'):'3era División C1',norm('3era DIVISIÓN 2'):'3era División C2'}
@@ -131,7 +124,6 @@ def leer_sancionados(ruta):
                 'sancion':str(c4).strip(),'fase2':str(c5).strip() if c5 else '','tipo':tipo})
     return sanc
 
-# ── BUSCAR ARCHIVOS ───────────────────────────────────────────────────────────
 def buscar_excels(carpeta):
     archivos=[f for f in os.listdir(carpeta) if f.endswith('.xlsx')]
     stats={}
@@ -145,14 +137,21 @@ def buscar_excels(carpeta):
                 stats[div]=os.path.join(carpeta,arch); break
     pos_ruta=next((os.path.join(carpeta,f) for f in archivos if any(k in f.lower() for k in ['torneo','posicion','fase'])),None)
     sanc_ruta=next((os.path.join(carpeta,f) for f in archivos if 'sancionado' in f.lower()),None)
-    return stats,pos_ruta,sanc_ruta
+    # Buscar logo PNG
+    logo_ruta=next((os.path.join(carpeta,f) for f in os.listdir(carpeta) if f.lower().endswith('.png')),None)
+    return stats,pos_ruta,sanc_ruta,logo_ruta
 
-# ── MAIN ─────────────────────────────────────────────────────────────────────
+def cargar_logo(logo_ruta):
+    if not logo_ruta or not os.path.exists(logo_ruta): return None
+    with open(logo_ruta,'rb') as f:
+        return 'data:image/png;base64,'+base64.b64encode(f.read()).decode()
+
 def procesar_todo(carpeta):
-    stats_rutas,pos_ruta,sanc_ruta=buscar_excels(carpeta)
+    stats_rutas,pos_ruta,sanc_ruta,logo_ruta=buscar_excels(carpeta)
     print("📁 Estadísticas:"); [print(f"   {d}: {os.path.basename(r)}") for d,r in stats_rutas.items()]
     if pos_ruta:  print(f"📁 Posiciones: {os.path.basename(pos_ruta)}")
     if sanc_ruta: print(f"📁 Sancionados: {os.path.basename(sanc_ruta)}")
+    if logo_ruta: print(f"🖼️  Logo: {os.path.basename(logo_ruta)}")
 
     res_stats={}
     for nombre,ruta in stats_rutas.items():
@@ -163,19 +162,26 @@ def procesar_todo(carpeta):
     if pos_ruta:
         wb_pos=openpyxl.load_workbook(pos_ruta,read_only=True,data_only=True)
         posiciones=leer_posiciones(wb_pos); res_partidos=leer_resultados(wb_pos)
-        print(f"\n📊 Posiciones y resultados cargados")
 
     sancionados={}
-    if sanc_ruta:
-        sancionados=leer_sancionados(sanc_ruta)
-        total_sanc=sum(len(v) for v in sancionados.values())
-        print(f"⚠️  Sancionados: {total_sanc} jugadores")
+    if sanc_ruta: sancionados=leer_sancionados(sanc_ruta)
+    print(f"⚠️  Sancionados: {sum(len(v) for v in sancionados.values())}")
 
-    # Calcular promedio goles por partido (todos los partidos del torneo)
+    logo_b64=cargar_logo(logo_ruta)
+
+    # Ranking equipos más amonestados (todas las divisiones)
+    ranking_equipos_amon=[]
+    for dn,data in res_stats.items():
+        for eq,stats in data['teamsData'].items():
+            tam=stats['total_amarillas']; tdo=stats['total_doble']; tro=stats['total_rojas']
+            pts=tam+tdo*2+tro*3
+            ranking_equipos_amon.append({'equipo':eq,'division':dn,'amarillas':tam,'dobles':tdo,'rojas':tro,'puntos':pts,'total':tam+tdo+tro})
+    ranking_equipos_amon.sort(key=lambda x:-x['puntos'])
+
     total_goles_torneo=0; total_partidos_torneo=0
     for div,fechas in res_partidos.items():
-        for fecha_data in fechas:
-            for p in fecha_data['partidos']:
+        for fd in fechas:
+            for p in fd['partidos']:
                 total_goles_torneo+=p['gl']+p['gv']; total_partidos_torneo+=1
     prom_goles_partido=round(total_goles_torneo/total_partidos_torneo,2) if total_partidos_torneo else 0
 
@@ -192,20 +198,21 @@ def procesar_todo(carpeta):
         tt=sum(d['total_amarillas']+d['total_doble']+d['total_rojas'] for d in data['teamsData'].values())
         ne=len(data['teamsData'])
         stats_div.append({'division':dn,'total_goles':tg,'total_tarjetas':tt,'num_equipos':ne,
-            'promedio_goles_equipo':round(tg/ne,1) if ne else 0,'promedio_tarjetas_equipo':round(tt/ne,1) if ne else 0})
+            'promedio_goles_equipo':round(tg/ne,1) if ne else 0})
     all_g.sort(key=lambda x:-x['goles']); all_c.sort(key=lambda x:-x['_p']); fp_t.sort(key=lambda x:x['total_tarjetas']); stats_div.sort(key=lambda x:-x['total_goles'])
     top_c=[{k:v for k,v in c.items() if k!='_p'} for c in all_c[:15]]
     global_torneo={'top_15_goleadores':all_g[:15],'top_15_amonestados':top_c,'fair_play':fp_t[:20],
         'ranking_divisiones':stats_div,'prom_goles_partido':prom_goles_partido,
-        'total_partidos':total_partidos_torneo,'total_sancionados':sum(len(v) for v in sancionados.values())}
-    for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None)
+        'total_partidos':total_partidos_torneo,
+        'ranking_equipos_amonestados':ranking_equipos_amon[:15]}
+    for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None); d.pop('_teams_tarj',None)
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,
-        'posiciones':posiciones,'resultados':res_partidos,'sancionados':sancionados,'globalTorneo':global_torneo}
+        'posiciones':posiciones,'resultados':res_partidos,'sancionados':sancionados,
+        'globalTorneo':global_torneo,'logo':logo_b64 or ''}
 
 def generar_html(datos):
     return HTML.replace('__JSON__', json.dumps(datos, ensure_ascii=False))
 
-# ── HTML ──────────────────────────────────────────────────────────────────────
 HTML = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -216,238 +223,205 @@ HTML = r"""<!DOCTYPE html>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#f5f6f8;--surface:#ffffff;--surface2:#f0f2f5;--surface3:#e8ebf0;
+  --bg:#f5f6f8;--surface:#fff;--surface2:#f0f2f5;--surface3:#e8ebf0;
   --border:#dde1ea;--border2:#c8cdd8;
   --red:#c8102e;--red-light:#fdf0f2;--red-mid:#f5c6cc;
   --gray:#1a1f2e;--gray2:#3d4460;--gray3:#6b7394;--gray4:#9ba3bf;
   --gold:#b8860b;--green:#1a7a3c;--green-light:#f0faf4;
   --orange:#c45c00;--orange-light:#fff4ec;
-  --blue:#1a3a6e;
+  --blue:#0057FF;
   --text:#1a1f2e;--text2:#3d4460;--text3:#6b7394;--text4:#9ba3bf;
   --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 12px rgba(0,0,0,.05);
   --shadow-md:0 4px 16px rgba(0,0,0,.10),0 1px 4px rgba(0,0,0,.06);
-  --1era:#c8102e;--2da:#1a3a6e;--c1:#1a7a3c;--c2:#b8860b;
+  --1era:#c8102e;--2da:#0057FF;--c1:#1a7a3c;--c2:#b8860b;
 }
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
-
-/* ── HEADER ── */
+/* HEADER */
 .site-header{background:var(--gray);border-bottom:3px solid var(--red);position:sticky;top:0;z-index:100;box-shadow:var(--shadow-md)}
-.header-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;padding:14px 24px;gap:16px}
-.logo-block{display:flex;align-items:center;gap:14px}
-.logo-emblem{width:48px;height:48px;background:var(--red);border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:24px;font-weight:900;color:white;letter-spacing:-1px;flex-shrink:0}
+.header-inner{max-width:1400px;margin:0 auto;display:flex;align-items:center;padding:10px 24px;gap:14px}
+.logo-img{width:46px;height:46px;object-fit:contain;flex-shrink:0}
 .logo-title{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;letter-spacing:1.5px;color:#fff;text-transform:uppercase;line-height:1}
 .logo-sub{font-size:10px;font-weight:600;color:rgba(255,255,255,.45);letter-spacing:2.5px;text-transform:uppercase;margin-top:3px}
-.header-season{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;color:var(--red);letter-spacing:2px;text-transform:uppercase;background:rgba(200,16,46,.12);border:1px solid rgba(200,16,46,.25);padding:5px 12px;border-radius:4px}
-
-/* ── NAV TABS ── */
-.div-tabs{background:var(--surface);border-bottom:2px solid var(--border);position:sticky;top:79px;z-index:90;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+/* NAV */
+.div-tabs{background:var(--surface);border-bottom:2px solid var(--border);position:sticky;top:69px;z-index:90;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .div-tabs-inner{max-width:1400px;margin:0 auto;display:flex;overflow-x:auto;scrollbar-width:none;padding:0 20px}
 .div-tabs-inner::-webkit-scrollbar{display:none}
-.dtab{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:14px 22px;border:none;background:transparent;color:var(--text3);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .18s;white-space:nowrap}
+.dtab{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;padding:13px 20px;border:none;background:transparent;color:var(--text3);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;transition:all .18s;white-space:nowrap}
 .dtab:hover{color:var(--text2);background:var(--surface2)}
 .dtab.active{color:var(--red);border-bottom-color:var(--red);background:var(--red-light)}
-
-/* ── MAIN ── */
-.main{max-width:1400px;margin:0 auto;padding:28px 20px}
-.tab-panel{display:none}
-.tab-panel.active{display:block}
-
-/* ── SUB-TABS ── */
-.sub-tabs{display:flex;gap:4px;margin-bottom:24px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px;width:fit-content}
-.stab{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:8px 18px;border:none;background:transparent;color:var(--text3);cursor:pointer;border-radius:6px;transition:all .18s}
+/* SUB TABS — compactos */
+.sub-tabs{display:flex;gap:3px;margin-bottom:22px;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:3px;width:fit-content}
+.stab{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:7px 14px;border:none;background:transparent;color:var(--text3);cursor:pointer;border-radius:5px;transition:all .18s;white-space:nowrap}
 .stab:hover{color:var(--text2);background:var(--surface2)}
 .stab.active{background:var(--gray);color:#fff}
 .sub-panel{display:none}
 .sub-panel.active{display:block}
-
-/* ── SECTION HEADER ── */
-.section-eyebrow{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--red);margin-bottom:4px}
-.section-title{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:900;letter-spacing:.5px;text-transform:uppercase;color:var(--gray);line-height:1}
-.section-title span{color:var(--red)}
-
-/* ── HERO STATS ── */
-.hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin:20px 0;box-shadow:var(--shadow)}
-.hero-stat{background:var(--surface);padding:22px 20px;text-align:center;border-right:1px solid var(--border)}
-.hero-stat:last-child{border-right:none}
-.hero-stat-val{font-family:'Barlow Condensed',sans-serif;font-size:40px;font-weight:900;line-height:1;color:var(--gray)}
-.hero-stat-val.red{color:var(--red)}
-.hero-stat-lbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text4);margin-top:4px}
-
-/* ── DIV CARDS ── */
-.div-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin:20px 0}
-.div-card{background:var(--surface);border-radius:10px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow);transition:box-shadow .2s}
-.div-card:hover{box-shadow:var(--shadow-md)}
-.div-card-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
-.div-card-title{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
-.div-card-rank{font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:900;color:var(--border2);line-height:1}
-.div-card-body{padding:14px 18px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;background:var(--surface2)}
-.div-stat-mini{text-align:center}
-.div-stat-mini-val{font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:800;color:var(--gray)}
-.div-stat-mini-lbl{font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--text4);margin-top:2px}
-
-/* ── GRID ── */
+/* LAYOUT */
+.main{max-width:1400px;margin:0 auto;padding:26px 20px}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
 .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}
 .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin:16px 0}
 @media(max-width:960px){.grid-3{grid-template-columns:1fr}.grid-2{grid-template-columns:1fr}}
-
-/* ── PANEL ── */
+/* PANEL */
 .panel{background:var(--surface);border-radius:10px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow)}
-.panel-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--surface)}
+.panel-head{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:9px}
 .panel-head-title{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--gray)}
 .panel-body{padding:12px}
-
-/* ── RANK ITEMS ── */
-.rank-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border:1px solid transparent;transition:all .15s;margin-bottom:3px}
+/* HERO */
+.hero-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0;background:var(--border);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin:20px 0;box-shadow:var(--shadow)}
+.hero-stat{background:var(--surface);padding:20px 16px;text-align:center;border-right:1px solid var(--border)}
+.hero-stat:last-child{border-right:none}
+.hero-stat-val{font-family:'Barlow Condensed',sans-serif;font-size:38px;font-weight:900;line-height:1;color:var(--gray)}
+.hero-stat-val.red{color:var(--red)}
+.hero-stat-lbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text4);margin-top:4px}
+/* DIV CARDS */
+.div-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:20px 0}
+.div-card{background:var(--surface);border-radius:10px;border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow)}
+.div-card-header{padding:13px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.div-card-title{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
+.div-card-rank{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:900;color:var(--border2);line-height:1}
+.div-card-body{padding:12px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;background:var(--surface2)}
+.div-stat-mini{text-align:center}
+.div-stat-mini-val{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;color:var(--gray)}
+.div-stat-mini-lbl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text4);margin-top:2px}
+/* SECTION HEADER */
+.section-eyebrow{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--red);margin-bottom:4px}
+.section-title{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:900;text-transform:uppercase;color:var(--gray);line-height:1}
+.section-title span{color:var(--red)}
+/* RANK */
+.rank-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;border:1px solid transparent;transition:all .15s;margin-bottom:3px}
 .rank-item:hover{background:var(--surface2);border-color:var(--border)}
-.rank-num{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;color:var(--text4);min-width:18px;text-align:center}
+.rank-num{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;color:var(--text4);min-width:16px;text-align:center}
 .rank-num.gold{color:var(--gold)}.rank-num.silver{color:#8a939a}.rank-num.bronze{color:#a0784a}
 .rank-info{flex:1;overflow:hidden}
 .rank-name{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rank-sub{font-size:10px;font-weight:600;color:var(--text3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rank-val{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;color:var(--gray);min-width:32px;text-align:right}
-.rank-val small{font-size:10px;color:var(--text4)}
-
-/* ── BADGES ── */
-.badge{display:inline-flex;align-items:center;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;padding:2px 6px;border-radius:3px;margin-left:3px;letter-spacing:.5px}
+.rank-val{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:800;color:var(--gray);min-width:30px;text-align:right}
+.rank-val small{font-size:9px;color:var(--text4)}
+/* BADGES */
+.badge{display:inline-flex;align-items:center;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;padding:2px 5px;border-radius:3px;margin-left:2px}
 .badge-yellow{background:#fef9c3;color:#854d0e;border:1px solid #fde68a}
 .badge-red{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
 .badge-orange{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa}
-
-/* ── SCORER BARS ── */
-.scorer-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;border:1px solid transparent;transition:all .15s;margin-bottom:3px}
+/* SCORER */
+.scorer-item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:6px;border:1px solid transparent;transition:all .15s;margin-bottom:3px}
 .scorer-item:hover{background:var(--surface2);border-color:var(--border)}
 .scorer-bar-wrap{flex:1;height:2px;background:var(--surface3);border-radius:2px;overflow:hidden;margin-top:4px}
 .scorer-bar{height:100%;border-radius:2px}
-
-/* ── FAIR PLAY ── */
-.fp-item{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;border:1px solid transparent;margin-bottom:3px;transition:all .15s}
+/* FP */
+.fp-item{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:6px;border:1px solid transparent;margin-bottom:3px;transition:all .15s}
 .fp-item:hover{background:var(--surface2);border-color:var(--border)}
 .fp-bar-wrap{flex:1;height:3px;background:var(--surface3);border-radius:2px;overflow:hidden}
 .fp-bar{height:100%;border-radius:2px}
-.fp-val{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray);min-width:28px;text-align:right}
-
-/* ── TABLA POSICIONES ── */
+.fp-val{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;color:var(--gray);min-width:26px;text-align:right}
+/* TABLA POSICIONES — ultra compacta */
 .pos-table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border)}
-.pos-table{width:100%;border-collapse:collapse;font-size:12px}
-.pos-table thead{background:var(--gray)}
-.pos-table th{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.6);padding:10px 10px;text-align:center;white-space:nowrap}
-.pos-table th:nth-child(2){text-align:left;min-width:140px}
-.pos-table td{padding:10px 10px;text-align:center;border-bottom:1px solid var(--border);color:var(--text2);font-weight:500;font-size:12px}
-.pos-table td:nth-child(2){text-align:left;font-weight:700;color:var(--text)}
+.pos-table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+.pos-table th{font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.65);padding:9px 5px;text-align:center;background:var(--gray);white-space:nowrap}
+.pos-table th.eq-col{text-align:left;width:130px;padding-left:8px}
+.pos-table th.pos-col{width:36px}
+.pos-table th.num-col{width:30px}
+.pos-table td{padding:8px 5px;text-align:center;border-bottom:1px solid var(--border);color:var(--text2);font-weight:500;font-size:11px}
+.pos-table td.eq-col{text-align:left;font-weight:700;color:var(--text);padding-left:8px;width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
 .pos-table tbody tr:hover td{background:var(--surface2)}
 .pos-table tbody tr:last-child td{border-bottom:none}
-.pts-col{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:900;color:var(--gray) !important}
-.dg-pos{color:var(--green) !important;font-weight:700}
-.dg-neg{color:var(--red) !important;font-weight:700}
-/* Zonas clasificación */
+.pts-col{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900}
+.dg-pos{color:var(--green);font-weight:700}
+.dg-neg{color:var(--red);font-weight:700}
 .zone-clf td{background:var(--green-light)}
-.zone-clf td:nth-child(2){border-left:3px solid var(--green)}
+.zone-clf td.eq-col{border-left:3px solid var(--green)}
 .zone-bot td{background:var(--orange-light)}
-.zone-bot td:nth-child(2){border-left:3px solid var(--orange)}
-.zone-top td:nth-child(2){border-left:3px solid var(--gold)}
-.pos-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900}
+.zone-bot td.eq-col{border-left:3px solid var(--orange)}
+.zone-top td.eq-col{border-left:3px solid var(--gold)}
+.pos-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:3px;font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:900}
 .pos-badge.gold{background:#fef9c3;color:var(--gold)}
 .pos-badge.clf{background:var(--green-light);color:var(--green)}
 .pos-badge.bot{background:var(--orange-light);color:var(--orange)}
 .pos-badge.norm{background:var(--surface2);color:var(--text3)}
-.table-legend{display:flex;gap:16px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text4);background:var(--surface2)}
-.legend-dot{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:4px}
-
-/* ── RESULTADOS ── */
-.fecha-block{margin-bottom:20px}
-.fecha-label{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;margin-bottom:10px;display:inline-block}
-.match-card{display:flex;align-items:center;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;gap:8px;transition:box-shadow .15s}
+.table-legend{display:flex;gap:14px;flex-wrap:wrap;padding:9px 12px;border-top:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text4);background:var(--surface2)}
+.legend-dot{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:middle}
+/* RESULTADOS */
+.fecha-block{margin-bottom:18px}
+.fecha-label{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);padding:5px 11px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;margin-bottom:9px;display:inline-block}
+.match-card{display:flex;align-items:center;padding:9px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:5px;gap:8px;transition:box-shadow .15s}
 .match-card:hover{box-shadow:var(--shadow-md)}
-.match-team{font-size:13px;font-weight:600;color:var(--text2);flex:1;line-height:1.3}
+.match-team{font-size:12px;font-weight:600;color:var(--text2);flex:1;line-height:1.3}
 .match-team.right{text-align:right}
 .match-team.winner{color:var(--text);font-weight:700}
-.match-score{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:var(--gray);background:var(--surface2);border:1px solid var(--border);padding:5px 14px;border-radius:6px;min-width:64px;text-align:center;letter-spacing:2px}
+.match-score{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:var(--surface2);border:1px solid var(--border);padding:4px 12px;border-radius:5px;min-width:58px;text-align:center;letter-spacing:2px}
 .match-score.draw{color:var(--text3)}
-
-/* ── SANCIONADOS ── */
-.sanc-table{width:100%;border-collapse:collapse;font-size:12px}
-.sanc-table th{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.6);padding:10px 12px;text-align:left;background:var(--gray);white-space:nowrap}
-.sanc-table td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--text2);font-size:12px;font-weight:500;vertical-align:middle}
+/* SANCIONADOS */
+.sanc-table{width:100%;border-collapse:collapse;font-size:11px}
+.sanc-table th{font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.65);padding:9px 11px;text-align:left;background:var(--gray);white-space:nowrap}
+.sanc-table td{padding:8px 11px;border-bottom:1px solid var(--border);color:var(--text2);font-size:11px;font-weight:500;vertical-align:middle}
 .sanc-table tbody tr:hover td{background:var(--surface2)}
 .sanc-table tbody tr:last-child td{border-bottom:none}
 .sanc-name{font-weight:700;color:var(--text)}
-.sanc-tag{display:inline-flex;align-items:center;font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;padding:2px 8px;border-radius:3px;letter-spacing:.5px;white-space:nowrap}
+.sanc-tag{display:inline-flex;align-items:center;font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;padding:2px 7px;border-radius:3px;letter-spacing:.5px;white-space:nowrap}
 .sanc-tag.grave{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
 .sanc-tag.media{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa}
 .sanc-tag.leve{background:#fefce8;color:#854d0e;border:1px solid #fde68a}
-.sanc-fase2{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--red);background:var(--red-light);border:1px solid var(--red-mid);padding:2px 8px;border-radius:3px;white-space:nowrap}
-.sanc-numero{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;color:var(--text4);background:var(--surface2);border:1px solid var(--border);width:30px;height:30px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
-
-/* ── DIV HERO ── */
-.div-hero{background:var(--surface);border-radius:10px;border:1px solid var(--border);border-top:3px solid var(--accent,var(--red));padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;box-shadow:var(--shadow)}
-.div-hero-title{font-family:'Barlow Condensed',sans-serif;font-size:32px;font-weight:900;letter-spacing:1px;text-transform:uppercase}
+.sanc-fase2{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;color:var(--red);background:var(--red-light);border:1px solid var(--red-mid);padding:2px 7px;border-radius:3px}
+.sanc-numero{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:900;color:var(--text4);background:var(--surface2);border:1px solid var(--border);width:28px;height:28px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
+/* RANKING EQUIPOS AMONESTADOS */
+.eq-amon-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:6px;background:var(--surface2);border:1px solid transparent;margin-bottom:3px;transition:all .15s}
+.eq-amon-item:hover{border-color:var(--border)}
+.eq-amon-badges{display:flex;gap:3px;flex-wrap:wrap;justify-content:flex-end}
+/* DIV HERO */
+.div-hero{background:var(--surface);border-radius:10px;border:1px solid var(--border);border-top:3px solid var(--accent,var(--red));padding:18px 22px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;box-shadow:var(--shadow)}
+.div-hero-title{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:900;letter-spacing:1px;text-transform:uppercase}
 .div-hero-meta{font-size:11px;color:var(--text3);font-weight:500;margin-top:3px}
-.div-kpis{display:flex;gap:28px;flex-wrap:wrap}
+.div-kpis{display:flex;gap:24px;flex-wrap:wrap}
 .div-kpi{text-align:center}
-.div-kpi-val{font-family:'Barlow Condensed',sans-serif;font-size:28px;font-weight:900;color:var(--gray)}
+.div-kpi-val{font-family:'Barlow Condensed',sans-serif;font-size:26px;font-weight:900;color:var(--gray)}
 .div-kpi-lbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text4)}
-
-/* ── TEAM SELECTOR ── */
-.team-selector-wrap{background:var(--surface);border-radius:10px;border:1px solid var(--border);padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;box-shadow:var(--shadow)}
-.team-selector-lbl{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap}
-.team-select{flex:1;min-width:180px;background:var(--surface);color:var(--text);border:1.5px solid var(--border2);border-radius:6px;padding:8px 12px;font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;cursor:pointer;outline:none;transition:border-color .15s}
+/* TEAM SELECTOR */
+.team-selector-wrap{background:var(--surface);border-radius:10px;border:1px solid var(--border);padding:13px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:var(--shadow)}
+.team-selector-lbl{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);white-space:nowrap}
+.team-select{flex:1;min-width:160px;background:var(--surface);color:var(--text);border:1.5px solid var(--border2);border-radius:6px;padding:7px 11px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;cursor:pointer;outline:none}
 .team-select:focus{border-color:var(--red)}
-
-/* ── TEAM KPIS ── */
-.team-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:1px;background:var(--border);border-radius:10px;overflow:hidden;margin-bottom:18px;box-shadow:var(--shadow)}
-.team-kpi{background:var(--surface);padding:16px;text-align:center}
-.team-kpi-val{font-family:'Barlow Condensed',sans-serif;font-size:36px;font-weight:900;color:var(--gray);line-height:1}
-.team-kpi-val.accent{color:var(--accent,var(--red))}
-.team-kpi-lbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text4);margin-top:4px}
-
-/* ── EMPTY ── */
-.empty{color:var(--text4);font-size:12px;padding:24px;text-align:center;font-style:italic}
-
-/* ── FOOTER ── */
-.site-footer{background:var(--gray);color:rgba(255,255,255,.4);text-align:center;padding:20px 16px;margin-top:40px;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;line-height:2}
+/* TEAM KPIS */
+.team-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:1px;background:var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:var(--shadow)}
+.team-kpi{background:var(--surface);padding:14px;text-align:center}
+.team-kpi-val{font-family:'Barlow Condensed',sans-serif;font-size:34px;font-weight:900;color:var(--gray);line-height:1}
+.team-kpi-lbl{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text4);margin-top:3px}
+/* DIVIDER */
+.divider{height:1px;background:var(--border);margin:22px 0}
+/* EMPTY */
+.empty{color:var(--text4);font-size:12px;padding:22px;text-align:center;font-style:italic}
+/* FOOTER */
+.site-footer{background:var(--gray);color:rgba(255,255,255,.4);text-align:center;padding:18px 16px;margin-top:40px;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;line-height:2.2}
 .site-footer .powered{color:var(--red);font-weight:900;letter-spacing:2px}
-.site-footer .update-time{color:rgba(255,255,255,.6);font-size:10px}
-
-/* ── DIVIDER ── */
-.divider{height:1px;background:var(--border);margin:20px 0}
-
+.site-footer .update-time{color:rgba(255,255,255,.55);font-size:10px;font-weight:600;letter-spacing:1px}
 @media(max-width:600px){
-  .header-inner{padding:10px 14px}
-  .logo-title{font-size:15px}
-  .main{padding:16px 12px}
-  .div-hero{padding:14px 16px}
-  .div-hero-title{font-size:24px}
-  .pos-table th,.pos-table td{padding:8px 6px;font-size:11px}
-  .match-card{padding:8px 10px}
-  .match-score{padding:4px 10px;min-width:52px;font-size:17px}
+  .header-inner{padding:9px 12px}
+  .logo-title{font-size:14px}
+  .main{padding:14px 10px}
+  .pos-table th.eq-col,.pos-table td.eq-col{width:110px;max-width:110px}
+  .match-score{min-width:50px;padding:4px 8px;font-size:16px}
 }
 </style>
 </head>
 <body>
-
 <header class="site-header">
   <div class="header-inner">
-    <div class="logo-block">
-      <div class="logo-emblem">L</div>
-      <div>
-        <div class="logo-title">Liga San Miguel de Ibarra</div>
-        <div class="logo-sub">LSMI · Estadísticas Oficiales</div>
-      </div>
+    <img id="logoImg" class="logo-img" alt="LSMI">
+    <div>
+      <div class="logo-title">Liga San Miguel de Ibarra</div>
+      <div class="logo-sub">LSMI · Estadísticas Oficiales</div>
     </div>
-    <div class="header-season">Temporada 2026</div>
   </div>
 </header>
-
 <nav class="div-tabs">
   <div class="div-tabs-inner">
-    <button class="dtab active" data-tab="global" onclick="switchTab(this,'global')">🏆 Global</button>
-    <button class="dtab" data-tab="1era División" onclick="switchTab(this,'1era División')">1era División</button>
-    <button class="dtab" data-tab="2da División" onclick="switchTab(this,'2da División')">2da División</button>
-    <button class="dtab" data-tab="3era División C1" onclick="switchTab(this,'3era División C1')">3era Div. C1</button>
-    <button class="dtab" data-tab="3era División C2" onclick="switchTab(this,'3era División C2')">3era Div. C2</button>
+    <button class="dtab active" onclick="switchTab(this,'global')">🏆 Global</button>
+    <button class="dtab" onclick="switchTab(this,'1era División')">1era División</button>
+    <button class="dtab" onclick="switchTab(this,'2da División')">2da División</button>
+    <button class="dtab" onclick="switchTab(this,'3era División C1')">3era Div. C1</button>
+    <button class="dtab" onclick="switchTab(this,'3era División C2')">3era Div. C2</button>
   </div>
 </nav>
-
 <main class="main">
   <div id="panel-global" class="tab-panel active"></div>
   <div id="panel-1era División" class="tab-panel"></div>
@@ -455,22 +429,20 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div id="panel-3era División C1" class="tab-panel"></div>
   <div id="panel-3era División C2" class="tab-panel"></div>
 </main>
-
 <footer class="site-footer">
   <div>LIGA SAN MIGUEL DE IBARRA · ESTADÍSTICAS OFICIALES · <span class="powered">POWERED BY NIX 26</span></div>
   <div class="update-time" id="footerDate"></div>
 </footer>
-
 <script>
 const DATA = __JSON__;
-const DIV_COLORS={'1era División':'#c8102e','2da División':'#1a3a6e','3era División C1':'#1a7a3c','3era División C2':'#b8860b'};
-const DIV_CLASSIFY={
-  '1era División':8,'2da División':8,'3era División C1':8,'3era División C2':8
-};
+const DIV_COLORS={'1era División':'#c8102e','2da División':'#0057FF','3era División C1':'#1a7a3c','3era División C2':'#b8860b'};
+const DIV_RIESGO={'1era División':4,'2da División':2,'3era División C1':4,'3era División C2':4};
+const DIV_CLASSIFY={'1era División':8,'2da División':8,'3era División C1':8,'3era División C2':8};
 
+// Logo
+if(DATA.logo){document.getElementById('logoImg').src=DATA.logo;}
 document.getElementById('footerDate').textContent='Actualizado: '+DATA.generado;
 
-// ── TABS ──
 function switchTab(btn,id){
   document.querySelectorAll('.dtab').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
@@ -485,14 +457,12 @@ function switchSub(btn,divId,subId){
   btn.classList.add('active');
   document.getElementById('sub-'+divId+'-'+subId).classList.add('active');
 }
-
-// ── HELPERS ──
 function badge(c,big=false){
-  const sz=big?'font-size:12px;padding:3px 9px':'';
+  const sz=big?'font-size:11px;padding:2px 8px':'';
   let b='';
-  if(c.rojas>0)   b+=`<span class="badge badge-red" style="${sz}">${c.rojas} ROJA${c.rojas>1?'S':''}</span>`;
-  if(c.dobles>0)  b+=`<span class="badge badge-orange" style="${sz}">${c.dobles} DBL</span>`;
-  if(c.amarillas>0)b+=`<span class="badge badge-yellow" style="${sz}">${c.amarillas} AMAR.</span>`;
+  if(c.rojas>0)    b+=`<span class="badge badge-red" style="${sz}">${c.rojas}R</span>`;
+  if(c.dobles>0)   b+=`<span class="badge badge-orange" style="${sz}">${c.dobles}D</span>`;
+  if(c.amarillas>0)b+=`<span class="badge badge-yellow" style="${sz}">${c.amarillas}A</span>`;
   return b;
 }
 function rankNum(i){
@@ -501,14 +471,14 @@ function rankNum(i){
   if(i===2)return'<span class="rank-num bronze">3</span>';
   return`<span class="rank-num">${i+1}</span>`;
 }
-function posBadge(pos,n,classify){
-  if(pos===1) return`<span class="pos-badge gold">${pos}</span>`;
-  if(pos<=classify) return`<span class="pos-badge clf">${pos}</span>`;
-  if(pos>n-3) return`<span class="pos-badge bot">${pos}</span>`;
+function posBadge(pos,n,classify,riesgo){
+  if(pos===1)return`<span class="pos-badge gold">${pos}</span>`;
+  if(pos<=classify)return`<span class="pos-badge clf">${pos}</span>`;
+  if(pos>n-riesgo)return`<span class="pos-badge bot">${pos}</span>`;
   return`<span class="pos-badge norm">${pos}</span>`;
 }
 
-// ── GLOBAL PANEL ──
+// ── GLOBAL ──
 function buildGlobal(){
   const g=DATA.globalTorneo;
   const totalG=g.ranking_divisiones.reduce((a,d)=>a+d.total_goles,0);
@@ -516,7 +486,7 @@ function buildGlobal(){
   const totalE=g.ranking_divisiones.reduce((a,d)=>a+d.num_equipos,0);
   const p=document.getElementById('panel-global');
   p.innerHTML=`
-  <div style="margin-bottom:24px">
+  <div style="margin-bottom:22px">
     <div class="section-eyebrow">Temporada 2026</div>
     <div class="section-title">Estadística <span>Global</span> del Torneo</div>
   </div>
@@ -529,19 +499,24 @@ function buildGlobal(){
     <div class="hero-stat"><div class="hero-stat-val">${g.prom_goles_partido}</div><div class="hero-stat-lbl">Promedio Goles/Partido</div></div>
   </div>
   <div class="div-cards" id="gDivCards"></div>
-  <div class="grid-3">
+  <div class="grid-3" style="margin-bottom:0">
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">⚽</span><span class="panel-head-title">Top 15 Goleadores</span></div>
+      <div class="panel-head"><span>⚽</span><span class="panel-head-title">Top 15 Goleadores</span></div>
       <div class="panel-body"><div id="gGol"></div></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">🟨</span><span class="panel-head-title">Top 15 Disciplina</span></div>
+      <div class="panel-head"><span>🟨</span><span class="panel-head-title">Ranking Amonestaciones</span></div>
       <div class="panel-body"><div id="gTarj"></div></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">🤝</span><span class="panel-head-title">Fair Play General</span></div>
+      <div class="panel-head"><span>🤝</span><span class="panel-head-title">Fair Play General</span></div>
       <div class="panel-body" id="gFP"></div>
     </div>
+  </div>
+  <div class="divider"></div>
+  <div class="panel" style="margin-bottom:0">
+    <div class="panel-head"><span>⚠️</span><span class="panel-head-title">Ranking Amonestación General — Equipos</span></div>
+    <div class="panel-body" id="gEqAmon"></div>
   </div>`;
 
   // Ranking divisiones
@@ -550,10 +525,8 @@ function buildGlobal(){
     const color=DIV_COLORS[d.division]||'#c8102e';
     rd.innerHTML+=`<div class="div-card">
       <div class="div-card-header">
-        <div>
-          <div class="div-card-title" style="color:${color}">${d.division}</div>
-          <div style="font-size:9px;color:var(--text4);font-weight:700;letter-spacing:1px;margin-top:2px">${d.num_equipos} EQUIPOS</div>
-        </div>
+        <div><div class="div-card-title" style="color:${color}">${d.division}</div>
+        <div style="font-size:9px;color:var(--text4);font-weight:700;letter-spacing:1px;margin-top:2px">${d.num_equipos} EQUIPOS</div></div>
         <div class="div-card-rank">#${i+1}</div>
       </div>
       <div class="div-card-body">
@@ -564,12 +537,10 @@ function buildGlobal(){
     </div>`;
   });
 
-  // Goleadores
-  const maxG=g.top_15_goleadores[0]?.goles||1;
+  const maxG2=g.top_15_goleadores[0]?.goles||1;
   const gg=document.getElementById('gGol');
   g.top_15_goleadores.forEach((pl,i)=>{
-    const color=DIV_COLORS[pl.division]||'#c8102e';
-    const pct=Math.round(pl.goles/maxG*100);
+    const color=DIV_COLORS[pl.division]||'#c8102e', pct=Math.round(pl.goles/maxG2*100);
     gg.innerHTML+=`<div class="scorer-item">${rankNum(i)}
       <div class="rank-info">
         <div class="rank-name">${pl.nombre}</div>
@@ -579,7 +550,6 @@ function buildGlobal(){
       <div class="rank-val">${pl.goles}<small> ⚽</small></div></div>`;
   });
 
-  // Tarjetas
   const gt=document.getElementById('gTarj');
   g.top_15_amonestados.forEach((c,i)=>{
     const color=DIV_COLORS[c.division]||'#c8102e';
@@ -588,10 +558,9 @@ function buildGlobal(){
         <div class="rank-name">${c.nombre}</div>
         <div class="rank-sub" style="color:${color}">${c.equipo} · ${c.division}</div>
       </div>
-      <div style="display:flex;gap:3px;flex-wrap:wrap">${badge(c)}</div></div>`;
+      <div style="display:flex;gap:2px;flex-wrap:wrap">${badge(c)}</div></div>`;
   });
 
-  // Fair play
   const maxFP=Math.max(...g.fair_play.map(f=>f.total_tarjetas))||1;
   const gfp=document.getElementById('gFP');
   g.fair_play.slice(0,16).forEach((eq,i)=>{
@@ -606,6 +575,28 @@ function buildGlobal(){
       </div>
       <div class="fp-val">${eq.total_tarjetas}</div></div>`;
   });
+
+  // Ranking equipos más amonestados
+  const maxP=g.ranking_equipos_amonestados[0]?.puntos||1;
+  const ea=document.getElementById('gEqAmon');
+  g.ranking_equipos_amonestados.forEach((eq,i)=>{
+    const color=DIV_COLORS[eq.division]||'#c8102e';
+    const pct=Math.round(eq.puntos/maxP*100);
+    ea.innerHTML+=`<div class="eq-amon-item">
+      ${rankNum(i)}
+      <div class="rank-info">
+        <div class="rank-name">${eq.equipo}</div>
+        <div class="rank-sub" style="color:${color}">${eq.division}</div>
+        <div class="scorer-bar-wrap"><div class="scorer-bar" style="width:${pct}%;background:${color}"></div></div>
+      </div>
+      <div class="eq-amon-badges">
+        ${eq.rojas>0?`<span class="badge badge-red">${eq.rojas}R</span>`:''}
+        ${eq.dobles>0?`<span class="badge badge-orange">${eq.dobles}D</span>`:''}
+        ${eq.amarillas>0?`<span class="badge badge-yellow">${eq.amarillas}A</span>`:''}
+        <span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;color:var(--gray);margin-left:6px;min-width:26px;text-align:right">${eq.puntos}</span>
+      </div>
+    </div>`;
+  });
 }
 
 // ── TABLA POSICIONES ──
@@ -613,38 +604,41 @@ function buildTablaPos(divNombre){
   const tabla=DATA.posiciones[divNombre]||[];
   const color=DIV_COLORS[divNombre]||'#c8102e';
   const classify=DIV_CLASSIFY[divNombre]||8;
-  if(!tabla.length) return`<div class="empty">Sin tabla de posiciones disponible</div>`;
+  const riesgo=DIV_RIESGO[divNombre]||3;
+  if(!tabla.length) return`<div class="empty">Sin tabla disponible</div>`;
   const n=tabla.length;
   let rows='';
-  tabla.forEach((eq,i)=>{
+  tabla.forEach(eq=>{
     const pos=eq.pos;
-    const isTop=pos===1; const isClf=pos>1&&pos<=classify; const isBot=pos>n-3;
+    const isTop=pos===1, isClf=pos>1&&pos<=classify, isBot=pos>n-riesgo;
     const rowCls=isTop?'zone-top':isClf?'zone-clf':isBot?'zone-bot':'';
     const dgCls=eq.dg>0?'dg-pos':eq.dg<0?'dg-neg':'';
     rows+=`<tr class="${rowCls}">
-      <td>${posBadge(pos,n,classify)}</td>
-      <td>${eq.equipo}</td>
-      <td>${eq.pj}</td><td>${eq.pg}</td><td>${eq.pe}</td><td>${eq.pp}</td>
-      <td>${eq.gf}</td><td>${eq.gc}</td>
-      <td class="${dgCls}">${eq.dg>0?'+':''}${eq.dg}</td>
-      <td class="pts-col" style="color:${color}">${eq.pts}</td>
+      <td class="pos-col">${posBadge(pos,n,classify,riesgo)}</td>
+      <td class="eq-col">${eq.equipo}</td>
+      <td class="num-col">${eq.pj}</td><td class="num-col">${eq.pg}</td>
+      <td class="num-col">${eq.pe}</td><td class="num-col">${eq.pp}</td>
+      <td class="num-col">${eq.gf}</td><td class="num-col">${eq.gc}</td>
+      <td class="num-col ${dgCls}">${eq.dg>0?'+':''}${eq.dg}</td>
+      <td class="num-col pts-col" style="color:${color}">${eq.pts}</td>
     </tr>`;
   });
   return`<div class="pos-table-wrap">
     <table class="pos-table">
       <thead><tr>
-        <th>#</th><th>Equipo</th>
-        <th title="Partidos Jugados">PJ</th><th title="Ganados">G</th>
-        <th title="Empatados">E</th><th title="Perdidos">P</th>
-        <th title="Goles a Favor">GF</th><th title="Goles en Contra">GC</th>
-        <th title="Diferencia">DG</th><th style="color:${color}">PTS</th>
+        <th class="pos-col">#</th>
+        <th class="eq-col">Equipo</th>
+        <th class="num-col">PJ</th><th class="num-col">G</th>
+        <th class="num-col">E</th><th class="num-col">P</th>
+        <th class="num-col">GF</th><th class="num-col">GC</th>
+        <th class="num-col">DG</th>
+        <th class="num-col" style="color:${color}">PTS</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="table-legend">
       <span><span class="legend-dot" style="background:#1a7a3c"></span>Clasificación Fase 3 (top ${classify})</span>
-      <span><span class="legend-dot" style="background:#c45c00"></span>Zona de riesgo</span>
-      <span>PJ · G · E · P · GF · GC · DG · PTS</span>
+      <span><span class="legend-dot" style="background:#c45c00"></span>Zona de riesgo (últimos ${riesgo})</span>
     </div>
   </div>`;
 }
@@ -654,10 +648,10 @@ function buildResultados(divNombre){
   const fechas=DATA.resultados[divNombre]||[];
   if(!fechas.length) return`<div class="empty">Sin resultados registrados</div>`;
   let html='';
-  fechas.forEach((f,fi)=>{
+  fechas.forEach(f=>{
     html+=`<div class="fecha-block"><div class="fecha-label">Fecha ${f.fecha} — Fase 2</div>`;
     f.partidos.forEach(p=>{
-      const draw=p.gl===p.gv, lW=p.gl>p.gv, vW=p.gv>p.gl;
+      const draw=p.gl===p.gv,lW=p.gl>p.gv,vW=p.gv>p.gl;
       html+=`<div class="match-card">
         <div class="match-team ${lW?'winner':''}" style="opacity:${vW?.6:1}">${p.local}</div>
         <div class="match-score ${draw?'draw':''}">${p.gl} — ${p.gv}</div>
@@ -672,12 +666,12 @@ function buildResultados(divNombre){
 // ── SANCIONADOS ──
 function buildSancionados(divNombre){
   const lista=DATA.sancionados[divNombre]||[];
-  if(!lista.length) return`<div class="empty">Sin sancionados registrados para esta división</div>`;
+  if(!lista.length) return`<div class="empty">Sin sancionados registrados</div>`;
   let rows='';
   lista.forEach(s=>{
-    const numDisplay=isNaN(s.numero)?`<span style="font-size:10px;font-weight:700;color:var(--text3)">${s.numero}</span>`:`<span class="sanc-numero">${s.numero}</span>`;
+    const numD=isNaN(s.numero)?`<span style="font-size:9px;font-weight:700;color:var(--text3)">${s.numero}</span>`:`<span class="sanc-numero">${s.numero}</span>`;
     rows+=`<tr>
-      <td style="text-align:center">${numDisplay}</td>
+      <td style="text-align:center">${numD}</td>
       <td><span class="sanc-name">${s.nombre}</span></td>
       <td style="color:var(--text2);font-weight:600">${s.club}</td>
       <td><span class="sanc-tag ${s.tipo}">${s.sancion}</span></td>
@@ -687,16 +681,15 @@ function buildSancionados(divNombre){
   return`<div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
     <table class="sanc-table">
       <thead><tr>
-        <th style="text-align:center;width:48px">#</th>
-        <th>Jugador / Dirigente</th>
-        <th>Club</th>
+        <th style="text-align:center;width:40px">#</th>
+        <th>Jugador / Dirigente</th><th>Club</th>
         <th>Sanción</th>
-        <th style="text-align:center">Suspensión Fase 2</th>
+        <th style="text-align:center">Fase 2</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </div>
-  <div style="font-size:10px;color:var(--text4);padding:8px 4px;display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">
+  <div style="font-size:10px;color:var(--text4);padding:8px 4px;display:flex;gap:14px;flex-wrap:wrap;margin-top:6px">
     <span><span class="sanc-tag grave" style="font-size:9px">Grave</span> Indefinido / Años / Meses</span>
     <span><span class="sanc-tag media" style="font-size:9px">Media</span> 2-3 Fechas</span>
     <span><span class="sanc-tag leve" style="font-size:9px">Leve</span> 1 Fecha</span>
@@ -714,7 +707,6 @@ function buildDivPanel(divNombre){
   const totalR=Object.values(divData.teamsData).reduce((a,t)=>a+t.total_rojas+t.total_doble,0);
   const ne=Object.keys(divData.teamsData).length;
   const p=document.getElementById('panel-'+divNombre);
-
   p.innerHTML=`
   <div class="div-hero" style="--accent:${color}">
     <div>
@@ -727,28 +719,24 @@ function buildDivPanel(divNombre){
       <div class="div-kpi"><div class="div-kpi-val">${totalR}</div><div class="div-kpi-lbl">Rojas/Dobles</div></div>
     </div>
   </div>
-
   <div class="sub-tabs">
-    <button class="stab active" onclick="switchSub(this,'${divNombre}','pos')">📊 Posiciones</button>
-    <button class="stab" onclick="switchSub(this,'${divNombre}','res')">📅 Resultados</button>
-    <button class="stab" onclick="switchSub(this,'${divNombre}','stats')">⚽ Estadísticas</button>
-    <button class="stab" onclick="switchSub(this,'${divNombre}','sanc')">🚫 Sancionados</button>
+    <button class="stab active" onclick="switchSub(this,'${divNombre}','pos')">POS</button>
+    <button class="stab" onclick="switchSub(this,'${divNombre}','res')">RES</button>
+    <button class="stab" onclick="switchSub(this,'${divNombre}','stats')">EST</button>
+    <button class="stab" onclick="switchSub(this,'${divNombre}','sanc')">SAN</button>
   </div>
-
   <div id="sub-${divNombre}-pos" class="sub-panel active">
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">🏆</span><span class="panel-head-title">Tabla de Posiciones · ${divNombre}</span></div>
+      <div class="panel-head"><span>🏆</span><span class="panel-head-title">Tabla de Posiciones · ${divNombre}</span></div>
       <div class="panel-body">${buildTablaPos(divNombre)}</div>
     </div>
   </div>
-
   <div id="sub-${divNombre}-res" class="sub-panel">
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">📅</span><span class="panel-head-title">Resultados · ${divNombre}</span></div>
+      <div class="panel-head"><span>📅</span><span class="panel-head-title">Resultados · ${divNombre}</span></div>
       <div class="panel-body">${buildResultados(divNombre)}</div>
     </div>
   </div>
-
   <div id="sub-${divNombre}-stats" class="sub-panel">
     <div class="team-selector-wrap">
       <span class="team-selector-lbl">Ver equipo</span>
@@ -759,15 +747,15 @@ function buildDivPanel(divNombre){
     <div id="divglobal-${divNombre}">
       <div class="grid-3">
         <div class="panel">
-          <div class="panel-head"><span style="font-size:16px">⚽</span><span class="panel-head-title">Top Goleadores</span></div>
+          <div class="panel-head"><span>⚽</span><span class="panel-head-title">Top Goleadores</span></div>
           <div class="panel-body"><div id="dg-${divNombre}"></div></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><span style="font-size:16px">🟨</span><span class="panel-head-title">Más Amonestados</span></div>
+          <div class="panel-head"><span>🟨</span><span class="panel-head-title">Ranking Amonestaciones</span></div>
           <div class="panel-body"><div id="dt-${divNombre}"></div></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><span style="font-size:16px">🤝</span><span class="panel-head-title">Fair Play</span></div>
+          <div class="panel-head"><span>🤝</span><span class="panel-head-title">Fair Play</span></div>
           <div class="panel-body" id="df-${divNombre}"></div>
         </div>
       </div>
@@ -777,21 +765,17 @@ function buildDivPanel(divNombre){
       <div class="grid-2" id="tgrid-${divNombre}"></div>
     </div>
   </div>
-
   <div id="sub-${divNombre}-sanc" class="sub-panel">
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">🚫</span><span class="panel-head-title">Sancionados · ${divNombre}</span></div>
+      <div class="panel-head"><span>🚫</span><span class="panel-head-title">Sancionados · ${divNombre}</span></div>
       <div class="panel-body">${buildSancionados(divNombre)}</div>
     </div>
   </div>`;
 
-  // Selector equipos
   const sel=document.getElementById('sel-'+divNombre);
   Object.keys(divData.teamsData).sort().forEach(t=>{
     const o=document.createElement('option');o.value=t;o.textContent='⚽ '+t;sel.appendChild(o);
   });
-
-  // Listas stats globales de la división
   const maxG2=gd.top_10_goleadores[0]?.goles||1;
   const dgEl=document.getElementById('dg-'+divNombre);
   gd.top_10_goleadores.forEach((pl,i)=>{
@@ -811,7 +795,7 @@ function buildDivPanel(divNombre){
         <div class="rank-name">${c.nombre}</div>
         <div class="rank-sub" style="color:${color}">${c.equipo}</div>
       </div>
-      <div style="display:flex;gap:3px;flex-wrap:wrap">${badge(c)}</div></div>`;
+      <div style="display:flex;gap:2px;flex-wrap:wrap">${badge(c)}</div></div>`;
   });
   const maxFP2=Math.max(...gd.fair_play.map(f=>f.total_tarjetas))||1;
   const dfEl=document.getElementById('df-'+divNombre);
@@ -835,13 +819,13 @@ function renderTeam(divNombre,equipo){
   const d=DATA.divisiones[divNombre].teamsData[equipo];
   const color=DIV_COLORS[divNombre]||'#c8102e';
   document.getElementById('tkpi-'+divNombre).innerHTML=`
-    <div class="team-kpi"><div class="team-kpi-val accent" style="color:${color}">${d.total_goles}</div><div class="team-kpi-lbl">Goles Totales</div></div>
-    <div class="team-kpi"><div class="team-kpi-val">${d.promedio_goles}</div><div class="team-kpi-lbl">Promedio Goles</div></div>
+    <div class="team-kpi"><div class="team-kpi-val" style="color:${color}">${d.total_goles}</div><div class="team-kpi-lbl">Goles Totales</div></div>
+    <div class="team-kpi"><div class="team-kpi-val">${d.promedio_goles}</div><div class="team-kpi-lbl">Prom. Goles</div></div>
     <div class="team-kpi"><div class="team-kpi-val">${d.total_amarillas}</div><div class="team-kpi-lbl">Amarillas</div></div>
     <div class="team-kpi"><div class="team-kpi-val">${d.total_rojas+d.total_doble}</div><div class="team-kpi-lbl">Rojas/Dobles</div></div>
     <div class="team-kpi"><div class="team-kpi-val">${d.promedio_tarjetas}</div><div class="team-kpi-lbl">Prom. Tarjetas</div></div>`;
   const maxG3=d.top_scorers[0]?.goles||1;
-  let golesH=d.top_scorers.length?'':'<div class="empty">Sin goles registrados</div>';
+  let golesH=d.top_scorers.length?'':'<div class="empty">Sin goles</div>';
   d.top_scorers.forEach((g,i)=>{
     const pct=Math.round(g.goles/maxG3*100);
     golesH+=`<div class="scorer-item">${rankNum(i)}
@@ -855,20 +839,19 @@ function renderTeam(divNombre,equipo){
   d.top_cards.forEach((c,i)=>{
     tarjH+=`<div class="rank-item">${rankNum(i)}
       <div class="rank-info"><div class="rank-name">${c.nombre}</div></div>
-      <div style="display:flex;gap:3px;flex-wrap:wrap">${badge(c,true)}</div></div>`;
+      <div style="display:flex;gap:2px;flex-wrap:wrap">${badge(c,true)}</div></div>`;
   });
   document.getElementById('tgrid-'+divNombre).innerHTML=`
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">⚽</span><span class="panel-head-title">${equipo} · Goleadores</span></div>
+      <div class="panel-head"><span>⚽</span><span class="panel-head-title">${equipo} · Goleadores</span></div>
       <div class="panel-body">${golesH}</div>
     </div>
     <div class="panel">
-      <div class="panel-head"><span style="font-size:16px">🟨</span><span class="panel-head-title">${equipo} · Disciplina</span></div>
+      <div class="panel-head"><span>🟨</span><span class="panel-head-title">${equipo} · Disciplina</span></div>
       <div class="panel-body">${tarjH}</div>
     </div>`;
 }
 
-// INICIALIZAR
 buildGlobal();
 ['1era División','2da División','3era División C1','3era División C2'].forEach(div=>buildDivPanel(div));
 </script>
@@ -882,6 +865,7 @@ if __name__=='__main__':
     salida=os.path.join(carpeta,'index.html')
     with open(salida,'w',encoding='utf-8') as f: f.write(html)
     print(f"\n✅ ¡Listo! → {salida}")
-    print(f"   Sancionados incluidos: {sum(len(v) for v in datos['sancionados'].values())}")
-    print(f"   Prom. goles/partido: {datos['globalTorneo']['prom_goles_partido']}")
+    print(f"   Logo: {'✓' if datos['logo'] else '✗ No encontrado'}")
+    print(f"   Sancionados: {sum(len(v) for v in datos['sancionados'].values())}")
+    print(f"   Prom goles/partido: {datos['globalTorneo']['prom_goles_partido']}")
     print("👉 Abre index.html con doble clic.")
