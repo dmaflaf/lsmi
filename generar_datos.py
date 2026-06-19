@@ -14,6 +14,51 @@ from datetime import datetime
 def norm(s):
     return unicodedata.normalize('NFD', str(s)).encode('ascii','ignore').decode('ascii').upper()
 
+def simplificar_nombre(nombre):
+    """Normaliza un nombre de equipo para comparaciones flexibles (quita tildes, puntos, minúsculas)."""
+    if not nombre: return ''
+    nfd = unicodedata.normalize('NFD', str(nombre))
+    sin_tildes = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    return sin_tildes.lower().replace('.','').replace('-','').replace("'","").strip()
+
+# Mapeo manual para nombres que difieren demasiado entre fuentes
+ALIAS_EQUIPOS = {
+    'boca jrs': 'Boca Jr',
+    'pradera de los sauces': 'Pradera',
+    'atletico racing': 'Racing',
+    'sporting athlas senior': 'Athlas Senior',
+    'estandar': 'Standard',
+    'scorpion': 'Scorpions',
+    'scorpions': 'Scorpions',
+}
+
+def construir_mapa_equipos(posiciones):
+    """Construye un diccionario {nombre_simplificado: nombre_oficial} desde las tablas de posiciones."""
+    mapa = {}
+    for div, tabla in posiciones.items():
+        for eq in tabla:
+            nombre = eq['equipo']
+            mapa[simplificar_nombre(nombre)] = nombre
+    # Agregar aliases manuales
+    for alias, oficial in ALIAS_EQUIPOS.items():
+        mapa[alias] = oficial
+    return mapa
+
+def resolver_nombre(nombre, mapa):
+    """Resuelve un nombre de equipo a su forma oficial. Devuelve (nombre_resuelto, fue_corregido)."""
+    key = simplificar_nombre(nombre)
+    if key in mapa:
+        oficial = mapa[key]
+        return oficial, (oficial != nombre)
+    return nombre, False
+
+def safe_print(msg):
+    """Print seguro para consolas Windows que no soportan emojis."""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', 'replace').decode('ascii'))
+
 HOJAS_POS = {'1era División':'1era División','2da División':'2da División','3era División C1':'3era División 1','3era División C2':'3era División 2'}
 DIV_RES      = {v:k for k,v in HOJAS_POS.items()}
 DIV_RIESGO   = {'1era División':4,'2da División':2,'3era División C1':4,'3era División C2':4}
@@ -139,7 +184,8 @@ def leer_horarios_json(carpeta):
             'cancha':item.get('escenario','Sin definir'),
             'local':item.get('local','').strip(),
             'visitante':item.get('visitante','').strip(),
-            'fase':item.get('fase','')
+            'fase':item.get('fase',''),
+            'veedor':item.get('veedor','').strip()
         })
     partidos.sort(key=lambda p:(p['fecha_iso'],p['hora']))
     return partidos
@@ -182,16 +228,16 @@ def buscar_excels(carpeta):
 
 def procesar_todo(carpeta):
     stats_rutas,pos_ruta,sanc_ruta,logo_ruta=buscar_excels(carpeta)
-    print("📁 Archivos:"); [print(f"   {d}: {os.path.basename(r)}") for d,r in stats_rutas.items()]
-    if pos_ruta: print(f"   Posiciones: {os.path.basename(pos_ruta)}")
-    if sanc_ruta: print(f"   Sancionados: {os.path.basename(sanc_ruta)}")
-    if logo_ruta: print(f"   Logo: {os.path.basename(logo_ruta)}")
+    safe_print("[+] Archivos:"); [safe_print(f"   {d}: {os.path.basename(r)}") for d,r in stats_rutas.items()]
+    if pos_ruta: safe_print(f"   Posiciones: {os.path.basename(pos_ruta)}")
+    if sanc_ruta: safe_print(f"   Sancionados: {os.path.basename(sanc_ruta)}")
+    if logo_ruta: safe_print(f"   Logo: {os.path.basename(logo_ruta)}")
 
     res_stats={}
     for nombre,ruta in stats_rutas.items():
-        print(f"\n⚽ {nombre}..."); res_stats[nombre]=procesar_stats(ruta)
+        safe_print(f"\n>> {nombre}..."); res_stats[nombre]=procesar_stats(ruta)
         total_amon=sum(len(d['top_cards']) for d in res_stats[nombre]['teamsData'].values())
-        print(f"   {len(res_stats[nombre]['teamsData'])} equipos | F{res_stats[nombre]['meta']['ultima_fecha']} | {total_amon} amonestados")
+        safe_print(f"   {len(res_stats[nombre]['teamsData'])} equipos | F{res_stats[nombre]['meta']['ultima_fecha']} | {total_amon} amonestados")
 
     posiciones={}; res_partidos={}
     if pos_ruta:
@@ -202,9 +248,49 @@ def procesar_todo(carpeta):
     if sanc_ruta: sancionados=leer_sancionados(sanc_ruta)
 
     horarios=leer_horarios_json(carpeta)
-    print(f"\n📅 Horarios cargados: {len(horarios)} partidos")
+    safe_print(f"\n[+] Horarios cargados: {len(horarios)} partidos")
     rivales_prox=leer_rivales_proximos(carpeta)
-    print(f"🔁 Rivales próximos (respaldo): {sum(len(v) for v in rivales_prox.values())} equipos")
+    safe_print(f"[+] Rivales proximos (respaldo): {sum(len(v) for v in rivales_prox.values())} equipos")
+
+    # ── NORMALIZACIÓN DE NOMBRES ──
+    mapa_eq = construir_mapa_equipos(posiciones)
+    correcciones = 0
+
+    # Normalizar nombres en horarios
+    for p in horarios:
+        for campo in ['local','visitante']:
+            nuevo, corregido = resolver_nombre(p[campo], mapa_eq)
+            if corregido:
+                safe_print(f"   [CORREGIDO horarios] '{p[campo]}' -> '{nuevo}'")
+                p[campo] = nuevo
+                correcciones += 1
+
+    # Normalizar nombres en sancionados
+    for div, lista in sancionados.items():
+        for s in lista:
+            nuevo, corregido = resolver_nombre(s['club'], mapa_eq)
+            if corregido:
+                safe_print(f"   [CORREGIDO sancionados] '{s['club']}' -> '{nuevo}'")
+                s['club'] = nuevo
+                correcciones += 1
+
+    # Normalizar nombres en rivales próximos
+    nuevos_rivales = {}
+    for div, eq_riv in rivales_prox.items():
+        nuevos_rivales[div] = {}
+        for equipo, rivs in eq_riv.items():
+            eq_nuevo, _ = resolver_nombre(equipo, mapa_eq)
+            nuevos_rivs = []
+            for r in rivs:
+                riv_nuevo, _ = resolver_nombre(r['rival'], mapa_eq)
+                nuevos_rivs.append({'fecha_label':r['fecha_label'],'rival':riv_nuevo})
+            nuevos_rivales[div][eq_nuevo] = nuevos_rivs
+    rivales_prox = nuevos_rivales
+
+    if correcciones:
+        safe_print(f"\n[OK] {correcciones} nombres de equipos corregidos automaticamente.")
+    else:
+        safe_print("\n[OK] Todos los nombres de equipos coinciden con la tabla de posiciones.")
 
     logo_b64=''
     if logo_ruta:
@@ -282,24 +368,26 @@ HTML = r"""<!DOCTYPE html>
   --blue:#1d4ed8;
   --gray:#1a1f2e;--gray2:#3d4460;--gray3:#6b7394;--gray4:#9ba3bf;
   --text:#1a1f2e;--text2:#3d4460;--text3:#6b7394;--text4:#9ba3bf;
-  --shadow-sm:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.05);
-  --shadow:0 4px 16px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.05);
+  --shadow-sm:0 1px 4px rgba(0,0,0,.08),0 2px 8px rgba(0,0,0,.04);
+  --shadow:0 4px 20px rgba(0,0,0,.10),0 1px 4px rgba(0,0,0,.06);
+  --shadow-lg:0 8px 40px rgba(0,0,0,.13),0 2px 8px rgba(0,0,0,.07);
+  --shadow-red:0 4px 20px rgba(200,16,46,.15),0 1px 4px rgba(200,16,46,.08);
   --1era:#c8102e;--2da:#1d4ed8;--c1:#1a7a3c;--c2:#b8860b;
 }
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;padding-bottom:80px;-webkit-font-smoothing:antialiased}
 
-.site-header{position:fixed;top:0;width:100%;z-index:100;height:64px;background:rgba(255,255,255,.95);backdrop-filter:blur(16px);border-bottom:2px solid var(--red);box-shadow:var(--shadow-sm);display:flex;align-items:center;padding:0 20px;gap:14px}
-.logo-img{width:42px;height:42px;object-fit:contain;border-radius:8px;flex-shrink:0}
+.site-header{position:fixed;top:0;width:100%;z-index:100;height:64px;background:rgba(255,255,255,.97);backdrop-filter:blur(20px);border-bottom:2px solid var(--red);box-shadow:0 2px 24px rgba(200,16,46,.12),0 1px 4px rgba(0,0,0,.06);display:flex;align-items:center;padding:0 20px;gap:14px}
+.logo-img{width:44px;height:44px;object-fit:contain;border-radius:10px;flex-shrink:0;box-shadow:0 2px 10px rgba(200,16,46,.25);border:2px solid rgba(200,16,46,.15)}
 .brand-title{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;letter-spacing:1px;text-transform:uppercase;color:var(--gray);line-height:1}
 .brand-sub{font-size:9px;font-weight:700;color:var(--text3);letter-spacing:3px;text-transform:uppercase;margin-top:2px}
 
-.site-nav{position:fixed;top:64px;width:100%;z-index:90;height:50px;background:var(--gray);border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;overflow:hidden}
+.site-nav{position:fixed;top:64px;width:100%;z-index:90;height:50px;background:linear-gradient(135deg,#1a1f2e 0%,#252b3d 100%);border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.18)}
 .nav-inner{display:flex;overflow-x:auto;white-space:nowrap;padding:0 16px;gap:2px;scrollbar-width:none;height:100%;align-items:center}
 .nav-inner::-webkit-scrollbar{display:none}
 .nav-btn{display:flex;align-items:center;gap:6px;padding:6px 16px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:rgba(255,255,255,.5);border:none;background:transparent;cursor:pointer;border-bottom:3px solid transparent;height:50px;transition:all .2s;white-space:nowrap}
 .nav-btn .material-symbols-outlined{font-size:17px}
 .nav-btn:hover{color:rgba(255,255,255,.85)}
-.nav-btn.active{color:#fff;border-bottom-color:var(--red)}
+.nav-btn.active{color:#fff;border-bottom-color:var(--red);background:rgba(200,16,46,.12)}
 
 /* ── SUB-NAV (POS/RES/EST/SAN) escritorio Y móvil ── */
 .sub-nav{position:sticky;top:114px;z-index:80;background:var(--surf);border-bottom:2px solid var(--border);box-shadow:var(--shadow-sm);margin:0 -16px 20px;padding:0 16px}
@@ -308,9 +396,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .subn-btn{display:flex;align-items:center;gap:7px;padding:13px 18px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);border:none;background:transparent;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;transition:all .18s}
 .subn-btn .material-symbols-outlined{font-size:18px}
 .subn-btn:hover{color:var(--text2);background:var(--surf2)}
-.subn-btn.active{color:var(--red);border-bottom-color:var(--red);background:var(--red-light)}
+.subn-btn.active{color:var(--red);border-bottom-color:var(--red);background:linear-gradient(to bottom,var(--red-light),transparent)}
 
-.bottom-nav{position:fixed;bottom:0;width:100%;z-index:100;background:var(--surf);border-top:2px solid var(--border);display:none;justify-content:space-around;padding:6px 0 10px;box-shadow:0 -4px 20px rgba(0,0,0,.08)}
+.bottom-nav{position:fixed;bottom:0;width:100%;z-index:100;background:rgba(255,255,255,.97);backdrop-filter:blur(16px);border-top:1px solid var(--border);display:none;justify-content:space-around;padding:6px 0 10px;box-shadow:0 -4px 24px rgba(0,0,0,.10)}
 .bnav-item{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 12px;border-radius:8px;transition:all .2s;color:var(--text3);border:none;background:transparent}
 .bnav-item.active{color:var(--red)}
 .bnav-item .material-symbols-outlined{font-size:22px}
@@ -320,6 +408,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 .view{display:none}
 .view.active{display:block}
+.sub-panel{display:none}
+.sub-panel.active{display:block}
 
 .s-eyebrow{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:var(--red);margin-bottom:6px}
 .s-title{font-family:'Barlow Condensed',sans-serif;font-size:clamp(26px,5vw,40px);font-weight:900;text-transform:uppercase;color:var(--gray);line-height:1;margin-bottom:24px}
@@ -328,9 +418,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .bento-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:28px}
 @media(min-width:640px){.bento-grid{grid-template-columns:repeat(3,1fr)}}
 @media(min-width:1024px){.bento-grid{grid-template-columns:repeat(6,1fr)}}
-.kpi-card{background:var(--surf);border:1px solid var(--border);border-radius:14px;padding:20px 16px;position:relative;overflow:hidden;transition:all .2s;box-shadow:var(--shadow-sm)}
-.kpi-card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
-.kpi-card.accent{border-top:3px solid var(--red)}
+.kpi-card{background:var(--surf);border:1px solid var(--border);border-radius:16px;padding:20px 16px;position:relative;overflow:hidden;transition:all .25s cubic-bezier(.4,0,.2,1);box-shadow:var(--shadow-sm)}
+.kpi-card:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
+.kpi-card.accent{border-top:3px solid var(--red);background:linear-gradient(135deg,#fff 60%,#fff5f6 100%);box-shadow:var(--shadow-red)}
 .kpi-card .live-dot{position:absolute;top:12px;right:12px;width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);animation:pulse 2s infinite}
 @keyframes pulse{0%{transform:scale(.95);opacity:.7}70%{transform:scale(1.1);opacity:1}100%{transform:scale(.95);opacity:.7}}
 .kpi-label{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:8px;display:block}
@@ -340,8 +430,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 .div-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:32px}
 @media(min-width:768px){.div-grid{grid-template-columns:repeat(4,1fr)}}
-.div-card{background:var(--surf);border:1px solid var(--border);border-radius:14px;overflow:hidden;transition:all .2s;box-shadow:var(--shadow-sm)}
-.div-card:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
+.div-card{background:var(--surf);border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:all .25s cubic-bezier(.4,0,.2,1);box-shadow:var(--shadow-sm)}
+.div-card:hover{box-shadow:var(--shadow-lg);transform:translateY(-3px)}
 .div-card-stripe{height:4px;width:100%}
 .div-card-body{padding:16px}
 .div-card-name{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;letter-spacing:.5px;text-transform:uppercase}
@@ -357,18 +447,21 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .grid-3{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:24px}
 @media(min-width:900px){.grid-3{grid-template-columns:1fr 1fr 1fr}}
 
-.panel{background:var(--surf);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:20px;box-shadow:var(--shadow-sm)}
-.panel-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surf)}
+.panel{background:var(--surf);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:20px;box-shadow:var(--shadow-sm);transition:box-shadow .2s}
+.panel:hover{box-shadow:var(--shadow)}
+.panel-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);background:linear-gradient(to right,var(--surf2),var(--surf))}
 .panel-head .material-symbols-outlined{font-size:20px;color:var(--red)}
 .panel-head-title{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--gray)}
 .panel-body{padding:10px}
 
 .scorer-row{display:flex;align-items:center;gap:12px;padding:10px;border-radius:10px;transition:background .15s;margin-bottom:2px}
 .scorer-row:hover{background:var(--surf2)}
-.scorer-row.top1{background:linear-gradient(90deg,var(--red-light) 0%,transparent 100%);border-left:3px solid var(--red)}
+.scorer-row.top1{background:linear-gradient(90deg,var(--red-light) 0%,transparent 80%);border-left:3px solid var(--red);box-shadow:inset 0 0 0 1px rgba(200,16,46,.06)}
 .scorer-row.top3{background:var(--surf2)}
-.rank-num{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:var(--text4);min-width:22px;text-align:center}
-.rank-num.gold{color:var(--gold)}.rank-num.silver{color:#6b7280}.rank-num.bronze{color:#92400e}
+.rank-num{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:var(--text4);min-width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;background:var(--surf2);text-align:center}
+.rank-num.gold{color:#fff;background:linear-gradient(135deg,#d4a017,#b8860b)}
+.rank-num.silver{color:#fff;background:linear-gradient(135deg,#8a9099,#6b7280)}
+.rank-num.bronze{color:#fff;background:linear-gradient(135deg,#b07030,#92400e)}
 .scorer-info{flex:1;min-width:0}
 .scorer-name{font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .scorer-meta{font-size:10px;font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -389,7 +482,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 .pos-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--border)}
 .pos-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
-.pos-table thead{background:var(--gray)}
+.pos-table thead{background:linear-gradient(135deg,#1a1f2e 0%,#252b3d 100%)}
 .pos-table th{font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.65);padding:10px 5px;text-align:center;white-space:nowrap}
 .pos-table th.eq-h{text-align:left;width:120px;padding-left:10px}
 .pos-table th.w30{width:28px}
@@ -415,16 +508,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 .fecha-block{margin-bottom:18px}
 .fecha-lbl{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);padding:5px 12px;background:var(--surf2);border:1px solid var(--border);border-radius:5px;margin-bottom:10px;display:inline-block}
-.match-card{display:flex;align-items:center;padding:10px 14px;background:var(--surf);border:1px solid var(--border);border-radius:10px;margin-bottom:5px;gap:10px;transition:box-shadow .15s}
-.match-card:hover{box-shadow:var(--shadow)}
+.match-card{display:flex;align-items:center;padding:10px 14px;background:var(--surf);border:1px solid var(--border);border-radius:12px;margin-bottom:6px;gap:10px;transition:all .2s}
+.match-card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
 .match-team{font-size:12px;font-weight:600;color:var(--text2);flex:1;line-height:1.3}
 .match-team.right{text-align:right}
 .match-team.winner{color:var(--text);font-weight:700}
-.match-score{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:var(--surf2);border:1px solid var(--border);padding:5px 14px;border-radius:7px;min-width:58px;text-align:center;letter-spacing:2px}
+.match-score{font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:5px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,.05)}
 .match-score.draw{color:var(--text3)}
 
-.fixture-card{display:flex;align-items:center;padding:12px 14px;background:var(--surf);border:1px solid var(--border);border-left:4px solid var(--accent,var(--red));border-radius:10px;margin-bottom:8px;gap:10px;box-shadow:var(--shadow-sm);transition:box-shadow .15s}
-.fixture-card:hover{box-shadow:var(--shadow)}
+.fixture-card{display:flex;align-items:center;padding:12px 14px;background:var(--surf);border:1px solid var(--border);border-left:4px solid var(--accent,var(--red));border-radius:12px;margin-bottom:8px;gap:10px;box-shadow:var(--shadow-sm);transition:all .2s cubic-bezier(.4,0,.2,1)}
+.fixture-card:hover{box-shadow:var(--shadow);transform:translateX(2px)}
 .fixture-time{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:50px;flex-shrink:0}
 .fixture-hora{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:var(--red);line-height:1.1;white-space:nowrap}
 .fixture-hora.tbd{color:var(--text4);font-size:10px}
@@ -434,6 +527,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .fixture-vs{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text4);padding:0 2px;flex-shrink:0}
 .fixture-cancha{font-size:9px;font-weight:700;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:2px}
 .fixture-cancha.tbd{color:var(--text4);font-style:italic}
+.fixture-veedor{font-size:9px;font-weight:600;color:var(--text4);white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:2px;margin-left:6px;padding-left:6px;border-left:1px solid var(--border)}
 @media(max-width:560px){
   .fixture-card{flex-wrap:wrap;padding:10px 12px}
   .fixture-teams{order:1;width:100%;justify-content:space-between;margin-top:6px}
@@ -459,7 +553,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .s-fase2{font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;color:var(--red);background:var(--red-light);border:1px solid var(--red-mid);padding:2px 7px;border-radius:3px}
 .s-num{font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:900;color:var(--text3);background:var(--surf2);border:1px solid var(--border);width:28px;height:28px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}
 
-.div-hero{background:var(--surf);border:1px solid var(--border);border-radius:14px;border-top:3px solid var(--accent,var(--red));padding:20px 22px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;box-shadow:var(--shadow-sm)}
+.div-hero{background:linear-gradient(135deg,var(--surf) 70%,var(--surf2) 100%);border:1px solid var(--border);border-radius:16px;border-top:4px solid var(--accent,var(--red));padding:22px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;box-shadow:var(--shadow)}
 .div-hero-title{font-family:'Barlow Condensed',sans-serif;font-size:clamp(22px,4vw,32px);font-weight:900;letter-spacing:1px;text-transform:uppercase}
 .div-hero-meta{font-size:11px;color:var(--text3);font-weight:500;margin-top:3px}
 .div-kpis{display:flex;gap:24px;flex-wrap:wrap}
@@ -487,7 +581,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .empty{color:var(--text4);font-size:12px;padding:22px;text-align:center;font-style:italic}
 .section-gap{margin-bottom:28px}
 
-.site-footer{background:var(--gray);border-top:2px solid var(--red);padding:36px 20px 100px;text-align:center}
+.search-input{width:100%;background:var(--surf);color:var(--text);border:1.5px solid var(--border2);border-radius:8px;padding:10px 14px 10px 38px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;outline:none;transition:border-color .2s,box-shadow .2s;margin-bottom:12px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%239ba3bf' viewBox='0 0 24 24'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:12px center}
+.search-input:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(200,16,46,.1)}
+.search-input::placeholder{color:var(--text4);font-weight:400}
+
+.site-footer{background:linear-gradient(135deg,#1a1f2e 0%,#252b3d 100%);border-top:2px solid var(--red);padding:36px 20px 100px;text-align:center;box-shadow:0 -4px 24px rgba(0,0,0,.15)}
 .footer-brand{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:10px}
 .footer-links{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:14px}
 .footer-links .nix{color:var(--red)}
@@ -511,7 +609,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <header class="site-header">
   <img id="logoImg" class="logo-img" alt="LSMI">
   <div>
-    <div class="brand-title">Liga San Miguel de Ibarra</div>
+    <h1 class="brand-title">Liga San Miguel de Ibarra</h1>
     <div class="brand-sub">LSMI · Estadísticas Oficiales</div>
   </div>
 </header>
@@ -569,6 +667,7 @@ function switchView(btn,id){
   btn.classList.add('active');
   document.getElementById('view-'+id).classList.add('active');
   curDiv=id;
+  document.title = id==='global' ? 'LSMI · Estadísticas Oficiales 2026' : id+' · LSMI';
   document.body.classList.toggle('division-activa', id!=='global');
   if(id!=='global'){
     const activeSub=subState[id]||'pos';
@@ -643,6 +742,7 @@ function buildGlobal(){
         pxHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
         pxHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
         pxHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+        if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
         pxHTML+=`</div>`;
       });
       pxHTML+=`</div>`;
@@ -652,7 +752,7 @@ function buildGlobal(){
   vg.innerHTML=`
   <div style="margin-bottom:22px">
     <div class="s-eyebrow">Temporada 2026</div>
-    <div class="s-title">Estadística <span>Global</span> del Torneo</div>
+    <h2 class="s-title">Estadística <span>Global</span> del Torneo</h2>
   </div>
   <div class="bento-grid">
     <div class="kpi-card accent"><div class="live-dot"></div><span class="kpi-label">Goles Totales</span><div class="kpi-val red">${g.total_goles}</div><span class="material-symbols-outlined kpi-icon">sports_soccer</span></div>
@@ -861,7 +961,7 @@ function buildDivPanel(divNombre){
   p.innerHTML=`
   <div class="div-hero" style="--accent:${color}">
     <div>
-      <div class="div-hero-title" style="color:${color}">${divNombre}</div>
+      <h2 class="div-hero-title" style="color:${color}">${divNombre}</h2>
       <div class="div-hero-meta">Fecha ${meta.ultima_fecha} · ${ne} equipos</div>
     </div>
     <div class="div-kpis">
@@ -927,7 +1027,10 @@ function buildDivPanel(divNombre){
   <div id="sub-${divNombre}-sanc" class="sub-panel">
     <div class="panel">
       <div class="panel-head"><span class="material-symbols-outlined">gavel</span><span class="panel-head-title">Sancionados · ${divNombre}</span></div>
-      <div class="panel-body">${buildSancionados(divNombre)}</div>
+      <div class="panel-body">
+        <input type="text" class="search-input" placeholder="Buscar jugador, club o sanción..." oninput="filtrarSanc(this,'sanc-tbl-${divNombre}')">
+        ${buildSancionados(divNombre)}
+      </div>
     </div>
   </div>`;
 
@@ -1003,6 +1106,7 @@ function renderTeam(divNombre,equipo){
           <div class="fixture-team" style="${p.visitante===equipo?'font-weight:900;color:'+color:''}">${p.visitante}</div>
         </div>
         <div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>
+        ${p.veedor?`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`:''}
       </div>`;
     });
   }
@@ -1095,7 +1199,7 @@ if __name__=='__main__':
     html=generar_html(datos)
     salida=os.path.join(carpeta,'index.html')
     with open(salida,'w',encoding='utf-8') as f: f.write(html)
-    print(f"\n✅ ¡Listo! → {salida}")
-    print(f"   Logo: {'✓' if datos['logo'] else '✗'}")
-    print(f"   Sancionados: {sum(len(v) for v in datos['sancionados'].values())}")
-    print(f"   Horarios: {len(datos['horarios'])}")
+    safe_print(f"\n[OK] Listo! -> {salida}")
+    safe_print(f"   Logo: {'SI' if datos['logo'] else 'NO'}")
+    safe_print(f"   Sancionados: {sum(len(v) for v in datos['sancionados'].values())}")
+    safe_print(f"   Horarios: {len(datos['horarios'])}")
