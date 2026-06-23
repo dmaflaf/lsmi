@@ -288,15 +288,26 @@ def procesar_todo(carpeta):
             nuevos_rivales[div][eq_nuevo] = nuevos_rivs
     rivales_prox = nuevos_rivales
 
-    # Enriquecer horarios con resultado si el partido ya fue jugado (busca por local+visitante en la misma división)
+    # Enriquecer horarios con resultado si el partido ya fue jugado
+    # Busca en ambas direcciones (local/visitante pueden estar invertidos entre horarios y RESULTADOS)
     for p in horarios:
         div = p['division']
+        loc = simplificar_nombre(p['local'])
+        vis = simplificar_nombre(p['visitante'])
         if div in res_partidos:
             for fd in res_partidos[div]:
                 for partido in fd['partidos']:
-                    if partido['local'] == p['local'] and partido['visitante'] == p['visitante']:
+                    rl = simplificar_nombre(partido['local'])
+                    rv = simplificar_nombre(partido['visitante'])
+                    if rl == loc and rv == vis:
+                        # Coincidencia directa
                         p['gl'] = partido['gl']
                         p['gv'] = partido['gv']
+                        break
+                    elif rl == vis and rv == loc:
+                        # Invertidos: intercambiar marcador para mantener perspectiva del horario
+                        p['gl'] = partido['gv']
+                        p['gv'] = partido['gl']
                         break
 
     if correcciones:
