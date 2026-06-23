@@ -153,7 +153,8 @@ def leer_sancionados(ruta):
             if any(x in s_upper for x in ['INDEFINIDO','AÑO','AÑOS','MESES','PROFESIONAL']): tipo='grave'
             elif any(x in s_upper for x in ['2 FECHA','3 FECHA']): tipo='media'
             else: tipo='leve'
-            sanc[div_actual].append({'numero':numero,'nombre':str(c2).strip(),'club':str(c3).strip(),'sancion':str(c4).strip(),'fase2':str(c5).strip() if c5 else '','tipo':tipo})
+            fase2_str = c5.strftime('%d/%m/%Y') if hasattr(c5,'strftime') else str(c5).strip() if c5 else ''
+            sanc[div_actual].append({'numero':numero,'nombre':str(c2).strip(),'club':str(c3).strip(),'sancion':str(c4).strip(),'fase2':fase2_str,'tipo':tipo})
     return sanc
 
 def leer_horarios_json(carpeta):
@@ -286,6 +287,17 @@ def procesar_todo(carpeta):
                 nuevos_rivs.append({'fecha_label':r['fecha_label'],'rival':riv_nuevo})
             nuevos_rivales[div][eq_nuevo] = nuevos_rivs
     rivales_prox = nuevos_rivales
+
+    # Enriquecer horarios con resultado si el partido ya fue jugado (busca por local+visitante en la misma división)
+    for p in horarios:
+        div = p['division']
+        if div in res_partidos:
+            for fd in res_partidos[div]:
+                for partido in fd['partidos']:
+                    if partido['local'] == p['local'] and partido['visitante'] == p['visitante']:
+                        p['gl'] = partido['gl']
+                        p['gv'] = partido['gv']
+                        break
 
     if correcciones:
         safe_print(f"\n[OK] {correcciones} nombres de equipos corregidos automaticamente.")
@@ -636,8 +648,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div class="footer-brand">Liga San Miguel de Ibarra · Estadísticas Oficiales</div>
   <div class="footer-links">
     <span class="nix">Powered by NIX 26</span>
-    <span style="opacity:.3">|</span>
-    <span id="footerDate"></span>
   </div>
   <p class="footer-quote">"Fomentando el deporte y la disciplina en la comunidad de Ibarra. Datos proporcionados por la Comisión Técnica LSMI."</p>
 </footer>
@@ -659,7 +669,6 @@ const subState={'1era División':'pos','2da División':'pos','3era División C1'
 let curDiv='global';
 
 if(DATA.logo) document.getElementById('logoImg').src=DATA.logo;
-document.getElementById('footerDate').textContent='Actualizado: '+DATA.generado;
 
 function switchView(btn,id){
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -735,15 +744,35 @@ function buildGlobal(){
       const color=DC[div]||'#c8102e';
       pxHTML+=`<div style="margin-bottom:18px">`;
       pxHTML+=`<div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:${color};margin-bottom:8px;padding-left:2px">${div}</div>`;
+      const now=new Date();
       parts.forEach(p=>{
         const horaTbd=p.hora==='Sin definir';
         const canchaTbd=p.cancha==='Sin definir';
-        pxHTML+=`<div class="fixture-card" style="--accent:${color}">`;
-        pxHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
-        pxHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
-        pxHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
-        if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
-        pxHTML+=`</div>`;
+        const horaFmt=horaTbd?'00:00':p.hora.replace('h',':');
+        const matchDt=new Date(p.fecha_iso+'T'+horaFmt+':00');
+        const isPast=now>matchDt;
+        const hasResult=p.gl!==undefined&&p.gl!==null;
+        if(isPast&&hasResult){
+          const gl=p.gl,gv=p.gv;
+          const lw=gl>gv,vw=gv>gl;
+          pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color}">`;
+          pxHTML+=`<div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>`;
+          pxHTML+=`<div class="fixture-teams">
+            <div class="fixture-team" style="${lw?'font-weight:900;color:'+color:''}">${p.local}</div>
+            <div class="fixture-vs" style="font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:4px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,.05)">${gl} – ${gv}</div>
+            <div class="fixture-team" style="${vw?'font-weight:900;color:'+color:''}">${p.visitante}</div>
+          </div>`;
+          pxHTML+=`<div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+          if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
+          pxHTML+=`</div>`;
+        } else {
+          pxHTML+=`<div class="fixture-card" style="--accent:${color}">`;
+          pxHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
+          pxHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
+          pxHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+          if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
+          pxHTML+=`</div>`;
+        }
       });
       pxHTML+=`</div>`;
     });
@@ -765,7 +794,7 @@ function buildGlobal(){
   <div class="div-grid" id="gDivCards"></div>
 
   <div class="panel section-gap">
-    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">Próximos Partidos — Horarios de la Semana</span></div>
+    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">Partidos de la Semana — Horarios & Resultados</span></div>
     <div class="panel-body">${pxHTML}</div>
   </div>
 
@@ -908,7 +937,7 @@ function buildResultados(divNombre){
   const fechas=DATA.resultados[divNombre]||[];
   let html=fechas.length?'':'<div class="empty">Sin resultados registrados</div>';
   fechas.forEach(f=>{
-    html+=`<div class="fecha-block"><div class="fecha-lbl">Fecha ${f.fecha} — Habilitación</div>`;
+    html+=`<div class="fecha-block"><div class="fecha-lbl">Fecha ${f.fecha}</div>`;
     f.partidos.forEach(p=>{
       const draw=p.gl===p.gv,lW=p.gl>p.gv,vW=p.gv>p.gl;
       html+=`<div class="match-card">
@@ -1092,22 +1121,43 @@ function renderTeam(divNombre,equipo){
     formaHTML+='</div>';
   }
 
-  // Próximos partidos CON horario asignado (solo si existen en horarios.json)
+  // Partidos programados — muestra resultado si ya pasó la fecha/hora, sino el fixture
   const horEq=(DATA.horarios||[]).filter(p=>p.local===equipo||p.visitante===equipo);
-  let pxHTML='<div class="empty">Sin horario asignado todavía</div>';
+  let pxHTML='<div class="empty">Sin partidos programados</div>';
   if(horEq.length){
     pxHTML='';
+    const nowEq=new Date();
     horEq.forEach(p=>{
-      pxHTML+=`<div class="fixture-card" style="--accent:${color}">
-        <div class="fixture-time"><div class="fixture-hora">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>
-        <div class="fixture-teams">
-          <div class="fixture-team" style="${p.local===equipo?'font-weight:900;color:'+color:''}">${p.local}</div>
-          <div class="fixture-vs">VS</div>
-          <div class="fixture-team" style="${p.visitante===equipo?'font-weight:900;color:'+color:''}">${p.visitante}</div>
-        </div>
-        <div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>
-        ${p.veedor?`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`:''}
-      </div>`;
+      const horaFmtEq=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');
+      const matchDtEq=new Date(p.fecha_iso+'T'+horaFmtEq+':00');
+      const isPastEq=nowEq>matchDtEq;
+      const hasResultEq=p.gl!==undefined&&p.gl!==null;
+      const lTeam=p.local===equipo;
+      if(isPastEq&&hasResultEq){
+        const gl=p.gl,gv=p.gv;
+        const lw=gl>gv,vw=gv>gl;
+        pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color}">
+          <div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>
+          <div class="fixture-teams">
+            <div class="fixture-team" style="${p.local===equipo?'font-weight:900;color:'+color:lw?'font-weight:700':''}">${p.local}</div>
+            <div class="fixture-vs" style="font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:4px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px">${gl} – ${gv}</div>
+            <div class="fixture-team" style="${p.visitante===equipo?'font-weight:900;color:'+color:vw?'font-weight:700':''}">${p.visitante}</div>
+          </div>
+          <div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>
+          ${p.veedor?`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`:''}
+        </div>`;
+      } else {
+        pxHTML+=`<div class="fixture-card" style="--accent:${color}">
+          <div class="fixture-time"><div class="fixture-hora${p.hora==='Sin definir'?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>
+          <div class="fixture-teams">
+            <div class="fixture-team" style="${p.local===equipo?'font-weight:900;color:'+color:''}">${p.local}</div>
+            <div class="fixture-vs">VS</div>
+            <div class="fixture-team" style="${p.visitante===equipo?'font-weight:900;color:'+color:''}">${p.visitante}</div>
+          </div>
+          <div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>
+          ${p.veedor?`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`:''}
+        </div>`;
+      }
     });
   }
 
