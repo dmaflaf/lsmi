@@ -189,7 +189,8 @@ def leer_horarios_json(carpeta):
             'veedor':item.get('veedor','').strip()
         })
     partidos.sort(key=lambda p:(p['fecha_iso'],p['hora']))
-    return partidos
+    proxima = raw.get('proxima_fecha','')
+    return partidos, proxima
 
 def leer_rivales_proximos(carpeta):
     """Lee Excel de próximos rivales (sin horario aún) como respaldo."""
@@ -248,8 +249,8 @@ def procesar_todo(carpeta):
     sancionados={}
     if sanc_ruta: sancionados=leer_sancionados(sanc_ruta)
 
-    horarios=leer_horarios_json(carpeta)
-    safe_print(f"\n[+] Horarios cargados: {len(horarios)} partidos")
+    horarios,proxima_fecha=leer_horarios_json(carpeta)
+    safe_print(f"\n[+] Horarios cargados: {len(horarios)} partidos | Proxima: {proxima_fecha}")
     rivales_prox=leer_rivales_proximos(carpeta)
     safe_print(f"[+] Rivales proximos (respaldo): {sum(len(v) for v in rivales_prox.values())} equipos")
 
@@ -366,7 +367,8 @@ def procesar_todo(carpeta):
     for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None)
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,'posiciones':posiciones,'resultados':res_partidos,
         'sancionados':sancionados,'globalTorneo':global_torneo,'logo':logo_b64,
-        'horarios':horarios,'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo}
+        'horarios':horarios,'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo,
+        'proximaFecha':proxima_fecha}
 
 def generar_html(datos):
     return HTML.replace('__JSON__', json.dumps(datos, ensure_ascii=False))
@@ -805,11 +807,11 @@ function buildGlobal(){
   <div class="div-grid" id="gDivCards"></div>
 
   <div class="panel section-gap">
-    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">Partidos de la Semana — Horarios & Resultados</span></div>
+    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">${(()=>{const f=DATA.horarios&&DATA.horarios.length?DATA.horarios[0].fase.match(/Fecha\s*(\d+)/):null;return f?'Fecha '+f[1]:'Fecha Actual';})()}&nbsp;— Horarios & Resultados</span></div>
     <div class="panel-body">${pxHTML}</div>
   </div>
 
-  <div class="grid-2">
+   <div class="grid-2">
     <div>
       <div class="panel">
         <div class="panel-head"><span class="material-symbols-outlined">leaderboard</span><span class="panel-head-title">Top 15 Goleadores</span></div>
@@ -1066,7 +1068,7 @@ function buildDivPanel(divNombre){
 
   <div id="sub-${divNombre}-sanc" class="sub-panel">
     <div class="panel">
-      <div class="panel-head"><span class="material-symbols-outlined">gavel</span><span class="panel-head-title">Sancionados · ${divNombre}</span></div>
+      <div class="panel-head"><span class="material-symbols-outlined">gavel</span><span class="panel-head-title">Sancionados · ${divNombre}</span><span style="margin-left:auto;font-size:9px;font-weight:600;color:var(--text4);white-space:nowrap">Actualizado: ${DATA.generado}</span></div>
       <div class="panel-body">
         <input type="text" class="search-input" placeholder="Buscar jugador, club o sanción..." oninput="filtrarSanc(this,'sanc-tbl-${divNombre}')">
         ${buildSancionados(divNombre)}
