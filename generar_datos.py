@@ -324,7 +324,7 @@ def procesar_todo(carpeta):
     for dn,data in res_stats.items():
         for eq,stats in data['teamsData'].items():
             tam=stats['total_amarillas']; tdo=stats['total_doble']; tro=stats['total_rojas']
-            pts=tam+tdo*2+tro*3
+            pts=tam+tdo+tro
             ranking_eq_amon.append({'equipo':eq,'division':dn,'amarillas':tam,'dobles':tdo,'rojas':tro,'puntos':pts})
     ranking_eq_amon.sort(key=lambda x:-x['puntos'])
 
@@ -547,9 +547,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .fixture-hora{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:var(--red);line-height:1.1;white-space:nowrap}
 .fixture-hora.tbd{color:var(--text4);font-size:10px}
 .fixture-dia{font-size:8px;font-weight:700;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;margin-top:3px;text-align:center;line-height:1.2;white-space:nowrap}
-.fixture-teams{flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:8px;min-width:0;overflow:hidden}
-.fixture-team{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;color:var(--gray);text-align:center;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fixture-vs{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text4);padding:0 2px;flex-shrink:0}
+.fixture-teams{flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:12px;min-width:0;overflow:hidden}
+.fixture-team{font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fixture-team:first-child{text-align:right}
+.fixture-team:last-child{text-align:left}
+.fixture-vs{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text4);padding:0 4px;flex-shrink:0}
 .fixture-cancha{font-size:9px;font-weight:700;color:var(--text3);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:2px}
 .fixture-cancha.tbd{color:var(--text4);font-style:italic}
 .fixture-veedor{font-size:9px;font-weight:600;color:var(--text4);white-space:nowrap;flex-shrink:0;display:flex;align-items:center;gap:2px;margin-left:6px;padding-left:6px;border-left:1px solid var(--border)}
@@ -610,6 +612,64 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .search-input:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(200,16,46,.1)}
 .search-input::placeholder{color:var(--text4);font-weight:400}
 
+/* ---- SHARE MODAL ---- */
+.share-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;align-items:center;justify-content:center;padding:16px}
+.share-overlay.open{display:flex}
+.share-modal{background:var(--surf);border:1px solid var(--border2);border-radius:16px;width:100%;max-width:440px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+.share-modal-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--surf);z-index:2}
+.share-modal-title{font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text)}
+.share-modal-close{background:none;border:1px solid var(--border2);border-radius:6px;color:var(--text3);font-size:14px;padding:4px 10px;cursor:pointer}
+/* SHARE CARD (dark card = the image) */
+.sc{background:#0d1120;border-radius:12px;margin:14px;overflow:hidden;font-family:'Barlow Condensed',sans-serif}
+.sc-head{background:#c8102e;padding:12px 16px;display:flex;align-items:center;gap:12px}
+.sc-ini{width:38px;height:38px;border-radius:8px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0;letter-spacing:.5px}
+.sc-ht{font-size:18px;font-weight:900;color:#fff;letter-spacing:.5px}
+.sc-hs{font-size:9px;color:rgba(255,255,255,.55);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
+.sc-sec{padding:10px 14px;border-bottom:.5px solid rgba(255,255,255,.07)}
+.sc-sec:last-of-type{border-bottom:none}
+.sc-stitle{font-size:8px;font-weight:800;color:rgba(255,255,255,.35);letter-spacing:2.5px;text-transform:uppercase;margin-bottom:8px}
+/* tabla posiciones dentro de la card */
+.sc-pos-tbl{width:100%;border-collapse:collapse;font-size:10px}
+.sc-pos-tbl th{color:rgba(255,255,255,.3);font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:0 4px 5px;text-align:center}
+.sc-pos-tbl th:nth-child(2){text-align:left}
+.sc-pos-tbl td{padding:4px;color:rgba(255,255,255,.7);text-align:center;border-top:.5px solid rgba(255,255,255,.05)}
+.sc-pos-tbl td:nth-child(2){text-align:left;color:#fff;font-weight:700}
+.sc-pos-tbl tr.sc-me td{background:rgba(200,16,46,.18)}
+.sc-pos-tbl tr.sc-me td:nth-child(2){color:#facc15}
+/* disciplina en card */
+.sc-disc-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:.5px solid rgba(255,255,255,.06)}
+.sc-disc-row:last-child{border-bottom:none}
+.sc-disc-num{font-size:10px;font-weight:800;color:rgba(255,255,255,.3);width:18px;text-align:center;flex-shrink:0}
+.sc-disc-name{font-size:11px;font-weight:700;color:#fff;flex:1}
+.sc-card-badge{display:inline-flex;align-items:center;justify-content:center;flex-direction:column;min-width:24px;padding:2px 5px;border-radius:4px;font-size:9px;font-weight:800;line-height:1.2}
+.sc-cb-r{background:rgba(200,16,46,.25);color:#f09595}
+.sc-cb-d{background:rgba(184,134,11,.25);color:#facc15}
+.sc-cb-a{background:rgba(184,134,11,.15);color:#f0c040}
+/* resultados y próximos */
+.sc-match-row{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.65);padding:4px 0;border-bottom:.5px solid rgba(255,255,255,.06)}
+.sc-match-row:last-child{border-bottom:none}
+.sc-mscr{font-size:13px;font-weight:800;color:#fff;min-width:40px;text-align:center}
+.sc-mdot{width:17px;height:17px;border-radius:50%;font-size:8px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
+.sc-mdot.V{background:#1d9e75}.sc-mdot.E{background:#888780}.sc-mdot.D{background:#e24b4a}
+/* footer card */
+.sc-foot{background:rgba(255,255,255,.04);padding:8px 14px;display:flex;align-items:center;justify-content:space-between}
+.sc-foot-brand{font-size:9px;color:rgba(255,255,255,.3);letter-spacing:1.5px;text-transform:uppercase;font-weight:700}
+.sc-foot-sp{font-size:9px;color:rgba(255,255,255,.25);font-weight:600}
+/* share action buttons */
+.share-actions{padding:14px 18px;display:flex;gap:8px;flex-wrap:wrap}
+.sh-btn{flex:1;min-width:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:10px 6px;border:1px solid var(--border2);border-radius:8px;cursor:pointer;background:var(--surf2);font-size:10px;font-weight:700;color:var(--text3);font-family:'Barlow Condensed',sans-serif;letter-spacing:.5px;text-transform:uppercase}
+.sh-btn .material-symbols-outlined{font-size:20px;color:var(--text3)}
+.sh-btn-primary{background:#c8102e;border-color:#c8102e;color:#fff;flex-direction:row;justify-content:center;gap:8px;font-size:13px;width:100%;min-width:unset}
+.sh-btn-primary .material-symbols-outlined{color:#fff;font-size:18px}
+/* SPONSORS PANEL */
+.sponsors-wrap{background:var(--surf);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:28px}
+.sponsors-title{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.sponsors-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+.sp-card{border:1px solid var(--border);border-radius:10px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center}
+.sp-card-logo{width:44px;height:44px;border-radius:8px;background:var(--surf2);display:flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;color:var(--text3)}
+.sp-card-name{font-size:11px;font-weight:700;color:var(--text2)}
+.sp-banner-slot{border:1.5px dashed var(--border2);border-radius:8px;padding:16px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--text4);font-size:11px;font-weight:600;font-family:'Barlow Condensed',sans-serif;letter-spacing:1px;text-transform:uppercase}
+
 .site-footer{background:linear-gradient(135deg,#1a1f2e 0%,#252b3d 100%);border-top:2px solid var(--red);padding:36px 20px 100px;text-align:center;box-shadow:0 -4px 24px rgba(0,0,0,.15)}
 .footer-brand{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:10px}
 .footer-links{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:rgba(255,255,255,.4);margin-bottom:14px}
@@ -656,6 +716,55 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div id="view-3era División C1" class="view"></div>
   <div id="view-3era División C2" class="view"></div>
 </main>
+
+<!-- SHARE MODAL -->
+<div class="share-overlay" id="shareOverlay" onclick="if(event.target===this)cerrarShare()">
+  <div class="share-modal">
+    <div class="share-modal-head">
+      <span class="share-modal-title" id="shareModalTitle">Compartir club</span>
+      <button class="share-modal-close" onclick="cerrarShare()">✕</button>
+    </div>
+    <div class="sc" id="shareCard">
+      <div class="sc-head">
+        <div class="sc-ini" id="scIni">RC</div>
+        <div><div class="sc-ht" id="scEquipo">Racing</div><div class="sc-hs" id="scDiv">1era División · LSMI · Fase 2</div></div>
+      </div>
+      <div class="sc-sec" id="scPosSection">
+        <div class="sc-stitle">Tabla de posiciones</div>
+        <table class="sc-pos-tbl"><thead><tr>
+          <th>#</th><th>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>Pts</th>
+        </tr></thead><tbody id="scPosTbl"></tbody></table>
+      </div>
+      <div class="sc-sec" id="scDiscSection">
+        <div class="sc-stitle">Sancionados / Disciplina</div>
+        <div id="scDisc"></div>
+      </div>
+      <div class="sc-sec" id="scResSection">
+        <div class="sc-stitle">Últimos resultados</div>
+        <div id="scRes"></div>
+      </div>
+      <div class="sc-sec" id="scNextSection">
+        <div class="sc-stitle">Próximos partidos</div>
+        <div id="scNext"></div>
+      </div>
+      <div class="sc-foot">
+        <span class="sc-foot-brand">lsmi.com.ec · Estadísticas Oficiales</span>
+        <span class="sc-foot-sp" id="scSponsor"></span>
+      </div>
+    </div>
+    <div class="share-actions">
+      <button class="sh-btn sh-btn-primary" onclick="descargarImagen()">
+        <span class="material-symbols-outlined">download</span>Descargar imagen
+      </button>
+      <button class="sh-btn" onclick="copiarLink()">
+        <span class="material-symbols-outlined">link</span>Copiar link
+      </button>
+      <button class="sh-btn" onclick="compartirWhatsApp()">
+        <span class="material-symbols-outlined">chat</span>WhatsApp
+      </button>
+    </div>
+  </div>
+</div>
 
 <footer class="site-footer">
   <div class="footer-brand">Liga San Miguel de Ibarra · Estadísticas Oficiales</div>
@@ -720,6 +829,15 @@ function showSubPanel(divId,sub){
   p.querySelectorAll('.subn-btn').forEach(sb=>sb.classList.toggle('active', sb.dataset.sub===sub));
   const sp=document.getElementById('sub-'+divId+'-'+sub);
   if(sp) sp.classList.add('active');
+}
+
+function filtrarSanc(input, tblId){
+  const q=input.value.toLowerCase().trim();
+  const rows=document.querySelectorAll('#'+tblId+' tbody tr');
+  rows.forEach(tr=>{
+    const txt=tr.innerText.toLowerCase();
+    tr.style.display=(!q||txt.includes(q))?'':'none';
+  });
 }
 
 function rn(i){
@@ -845,6 +963,15 @@ function buildGlobal(){
         <tbody id="eqAmonBody"></tbody>
       </table></div>
     </div>
+  </div>
+
+  <div class="sponsors-wrap" id="sponsorsPanel" style="display:none">
+    <div class="sponsors-title"><span class="material-symbols-outlined" style="font-size:18px">business</span>Empresas Afiliadas</div>
+    <div class="sponsors-grid" id="sponsorsGrid"></div>
+    <div class="sp-banner-slot" id="sponsorsBanner">
+      <span class="material-symbols-outlined" style="font-size:20px">image</span>
+      Banner publicitario · 728 × 90 px
+    </div>
   </div>`;
 
   const dc=document.getElementById('gDivCards');
@@ -966,7 +1093,7 @@ function buildResultados(divNombre){
 
 function buildSancionados(divNombre){
   const lista=DATA.sancionados[divNombre]||[];
-  if(!lista.length) return`<div class="empty">Sin sancionados registrados</div>`;
+  if(!lista.length) return`<div id="sanc-tbl-${divNombre}"><div class="empty">Sin sancionados registrados</div></div>`;
   let rows='';
   lista.forEach(s=>{
     const numD=isNaN(s.numero)?`<span style="font-size:9px;font-weight:700;color:var(--text3)">${s.numero}</span>`:`<span class="s-num">${s.numero}</span>`;
@@ -978,7 +1105,7 @@ function buildSancionados(divNombre){
       <td style="text-align:center;padding:10px 12px;border-bottom:1px solid var(--border)">${s.fase2?`<span class="s-fase2">${s.fase2}</span>`:'-'}</td>
     </tr>`;
   });
-  return`<div style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">
+  return`<div id="sanc-tbl-${divNombre}" style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">
     <table class="sanc-table"><thead><tr>
       <th style="text-align:center;width:44px">#</th><th>Jugador / Dirigente</th><th>Club</th>
       <th>Sanción</th><th style="text-align:center">Habilitación</th>
@@ -1217,6 +1344,7 @@ function renderTeam(divNombre,equipo){
   document.getElementById('dv-team-'+divNombre).innerHTML=`
     <div class="div-hero" style="--accent:${color};margin-bottom:16px">
       <div><div class="div-hero-title" style="color:${color};font-size:24px">${equipo}</div><div class="div-hero-meta">${divNombre}</div></div>
+      <button onclick="abrirShare('${equipo}','${divNombre}')" style="display:flex;align-items:center;gap:6px;background:#c8102e;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;cursor:pointer"><span class="material-symbols-outlined" style="font-size:16px">share</span>Compartir</button>
     </div>
     <div class="team-kpi-row">
       <div class="team-kpi"><div class="team-kpi-val" style="color:${color}">${d.total_goles}</div><div class="team-kpi-lbl">Goles</div></div>
@@ -1252,7 +1380,116 @@ function renderTeam(divNombre,equipo){
 
 buildGlobal();
 ['1era División','2da División','3era División C1','3era División C2'].forEach(div=>buildDivPanel(div));
+
+// ---- SHARE FUNCTIONS ----
+const SPONSORS=[];// Agrega sponsors: {nombre:'Empresa',ini:'EM',bg:'#eeedfe',color:'#3c3489'}
+
+function abrirShare(equipo,divNombre){
+  const d=DATA.divisiones[divNombre];
+  const td=d.teamsData[equipo];
+  const color=DC[divNombre]||'#c8102e';
+  const ini=equipo.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+
+  document.getElementById('shareModalTitle').textContent='Compartir — '+equipo;
+  document.getElementById('scIni').textContent=ini;
+  document.getElementById('scIni').style.background=color;
+  document.getElementById('scEquipo').textContent=equipo;
+  document.getElementById('scDiv').textContent=divNombre+' · LSMI · Fase 2';
+
+  // Tabla posiciones completa
+  const pos=(DATA.posiciones&&DATA.posiciones[divNombre])||[];
+  const tbl=document.getElementById('scPosTbl');
+  tbl.innerHTML='';
+  pos.forEach((p,i)=>{
+    const tr=document.createElement('tr');
+    if(p.equipo===equipo) tr.className='sc-me';
+    tr.innerHTML=`<td style="color:rgba(255,255,255,.35)">${i+1}</td><td>${p.equipo}</td><td>${p.pj}</td><td>${p.g}</td><td>${p.e}</td><td>${p.p}</td><td>${p.gf}</td><td>${p.gc}</td><td style="font-weight:800;color:#fff">${p.pts}</td>`;
+    tbl.appendChild(tr);
+  });
+
+  // Disciplina
+  const disc=document.getElementById('scDisc');
+  disc.innerHTML='';
+  if(td.top_cards&&td.top_cards.length){
+    td.top_cards.forEach((c,i)=>{
+      let badges='';
+      if(c.rojas>0) badges+=`<span class="sc-card-badge sc-cb-r">${c.rojas}<span style="font-size:7px">R</span></span>`;
+      if(c.dobles>0) badges+=`<span class="sc-card-badge sc-cb-d">${c.dobles}<span style="font-size:7px">D</span></span>`;
+      if(c.amarillas>0) badges+=`<span class="sc-card-badge sc-cb-a">${c.amarillas}<span style="font-size:7px">A</span></span>`;
+      disc.innerHTML+=`<div class="sc-disc-row"><span class="sc-disc-num">${i+1}</span><span class="sc-disc-name">${c.nombre}</span><div style="display:flex;gap:3px">${badges}</div></div>`;
+    });
+  } else {
+    disc.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:6px 0">Sin tarjetas registradas</div>';
+  }
+
+  // Últimos resultados
+  const res=document.getElementById('scRes');
+  res.innerHTML='';
+  const ultimos=(DATA.ultimos_por_equipo||{})[equipo]||[];
+  if(ultimos.length){
+    ultimos.forEach(u=>{
+      res.innerHTML+=`<div class="sc-match-row"><span>vs ${u.rival}</span><span class="sc-mscr">${u.gf}–${u.gc}</span><span class="sc-mdot ${u.resultado}">${u.resultado}</span></div>`;
+    });
+  } else {
+    res.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35)">Sin resultados</div>';
+  }
+
+  // Próximos partidos
+  const nxt=document.getElementById('scNext');
+  nxt.innerHTML='';
+  const prox=(DATA.horarios||[]).filter(p=>p.local===equipo||p.visitante===equipo);
+  const now=new Date();
+  const futuros=prox.filter(p=>{const h=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');return now<=new Date(p.fecha_iso+'T'+h+':00');});
+  if(futuros.length){
+    futuros.forEach(p=>{
+      const rival=p.local===equipo?p.visitante:p.local;
+      nxt.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.4);font-size:9px">${p.dia}</span><span>vs ${rival}</span><span style="font-size:9px;color:rgba(255,255,255,.5)">${p.hora}</span></div>`;
+    });
+  } else {
+    nxt.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35)">Sin próximos partidos</div>';
+  }
+
+  // Sponsor pie
+  const sp=document.getElementById('scSponsor');
+  sp.textContent=SPONSORS.length?'Con el auspicio de: '+SPONSORS.map(s=>s.nombre).join(' · '):'';
+
+  document.getElementById('shareOverlay').classList.add('open');
+}
+
+function cerrarShare(){document.getElementById('shareOverlay').classList.remove('open');}
+
+function descargarImagen(){
+  const card=document.getElementById('shareCard');
+  if(window.html2canvas){
+    html2canvas(card,{backgroundColor:'#0d1120',scale:2,useCORS:true}).then(canvas=>{
+      const a=document.createElement('a');
+      a.download='LSMI_'+document.getElementById('scEquipo').textContent.replace(/\s+/g,'_')+'.png';
+      a.href=canvas.toDataURL('image/png');a.click();
+    });
+  } else {
+    alert('Cargando herramienta de imagen, intenta en 3 segundos...');
+  }
+}
+
+function copiarLink(){
+  const equipo=document.getElementById('scEquipo').textContent;
+  const txt='Liga San Miguel de Ibarra — '+equipo+' | Estadísticas LSMI: lsmi.com.ec';
+  navigator.clipboard.writeText(txt).then(()=>{
+    const btn=event.target.closest('button');
+    const orig=btn.innerHTML;
+    btn.innerHTML='<span class="material-symbols-outlined">check</span>¡Copiado!';
+    setTimeout(()=>{btn.innerHTML=orig;},2000);
+  });
+}
+
+function compartirWhatsApp(){
+  const equipo=document.getElementById('scEquipo').textContent;
+  const div=document.getElementById('scDiv').textContent;
+  const txt=encodeURIComponent('⚽ *'+equipo+'* — '+div+'\n📊 Estadísticas LSMI: lsmi.com.ec');
+  window.open('https://wa.me/?text='+txt,'_blank');
+}
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </body>
 </html>"""
 
