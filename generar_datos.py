@@ -725,31 +725,52 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <button class="share-modal-close" onclick="cerrarShare()">✕</button>
     </div>
     <div class="sc" id="shareCard">
-      <div class="sc-head">
-        <div class="sc-ini" id="scIni">RC</div>
-        <div><div class="sc-ht" id="scEquipo">Racing</div><div class="sc-hs" id="scDiv">1era División · LSMI · Fase 2</div></div>
+      <!-- ENCABEZADO: LSMI + logo club -->
+      <div id="sc-head-bar" class="sc-head" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div id="scLogoLSMI" style="width:36px;height:36px;border-radius:6px;overflow:hidden;flex-shrink:0;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center"></div>
+          <div>
+            <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:800;letter-spacing:2px;color:rgba(255,255,255,.6);text-transform:uppercase">Liga San Miguel de Ibarra</div>
+            <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:10px;color:rgba(255,255,255,.4);letter-spacing:1px;text-transform:uppercase" id="scDiv">1era División</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="sc-ini" id="scIni" style="width:46px;height:46px;font-size:16px">RC</div>
+          <div class="sc-ht" id="scEquipo" style="font-size:20px">Racing</div>
+        </div>
       </div>
-      <div class="sc-sec" id="scPosSection">
+      <!-- TABLA POSICIONES -->
+      <div class="sc-sec">
         <div class="sc-stitle">Tabla de posiciones</div>
         <table class="sc-pos-tbl"><thead><tr>
           <th>#</th><th>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>Pts</th>
         </tr></thead><tbody id="scPosTbl"></tbody></table>
       </div>
-      <div class="sc-sec" id="scDiscSection">
-        <div class="sc-stitle">Sancionados / Disciplina</div>
-        <div id="scDisc"></div>
-      </div>
-      <div class="sc-sec" id="scResSection">
-        <div class="sc-stitle">Últimos resultados</div>
-        <div id="scRes"></div>
-      </div>
-      <div class="sc-sec" id="scNextSection">
-        <div class="sc-stitle">Próximos partidos</div>
+      <!-- PRÓXIMO PARTIDO -->
+      <div class="sc-sec">
+        <div class="sc-stitle">Próximo partido</div>
         <div id="scNext"></div>
       </div>
+      <!-- PARTIDOS JUGADOS -->
+      <div class="sc-sec">
+        <div class="sc-stitle">Últimos partidos jugados</div>
+        <div id="scRes"></div>
+      </div>
+      <!-- PRÓXIMOS RIVALES -->
+      <div class="sc-sec">
+        <div class="sc-stitle">Próximos rivales</div>
+        <div id="scRivales"></div>
+      </div>
+      <!-- SPONSORS -->
+      <div class="sc-sec" id="scSponsorsSection" style="display:none">
+        <div class="sc-stitle">Con el auspicio de</div>
+        <div id="scSponsorsLogos" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"></div>
+      </div>
+      <!-- PIE -->
       <div class="sc-foot">
         <span class="sc-foot-brand">lsmi.com.ec · Estadísticas Oficiales</span>
-        <span class="sc-foot-sp" id="scSponsor"></span>
+        <span class="sc-foot-sp" id="scSponsorText"></span>
+        <span style="font-size:8px;color:rgba(255,255,255,.2);letter-spacing:1px;font-weight:700;font-family:'Barlow Condensed',sans-serif;text-transform:uppercase">Powered by NIX</span>
       </div>
     </div>
     <div class="share-actions">
@@ -833,9 +854,11 @@ function showSubPanel(divId,sub){
 
 function filtrarSanc(input, tblId){
   const q=input.value.toLowerCase().trim();
-  const rows=document.querySelectorAll('#'+tblId+' tbody tr');
+  const wrap=document.getElementById(tblId);
+  if(!wrap) return;
+  const rows=wrap.querySelectorAll('tbody tr');
   rows.forEach(tr=>{
-    const txt=tr.innerText.toLowerCase();
+    const txt=(tr.innerText||tr.textContent).toLowerCase();
     tr.style.display=(!q||txt.includes(q))?'':'none';
   });
 }
@@ -1386,72 +1409,92 @@ const SPONSORS=[];// Agrega sponsors: {nombre:'Empresa',ini:'EM',bg:'#eeedfe',co
 
 function abrirShare(equipo,divNombre){
   const d=DATA.divisiones[divNombre];
-  const td=d.teamsData[equipo];
   const color=DC[divNombre]||'#c8102e';
   const ini=equipo.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
 
   document.getElementById('shareModalTitle').textContent='Compartir — '+equipo;
-  document.getElementById('scIni').textContent=ini;
-  document.getElementById('scIni').style.background=color;
+  const iniEl=document.getElementById('scIni');
+  iniEl.textContent=ini; iniEl.style.background=color;
   document.getElementById('scEquipo').textContent=equipo;
   document.getElementById('scDiv').textContent=divNombre+' · LSMI · Fase 2';
+  document.getElementById('sc-head-bar').style.background=color;
 
-  // Tabla posiciones completa
+  // Logo LSMI en encabezado
+  const lsmiEl=document.getElementById('scLogoLSMI');
+  if(DATA.logo) lsmiEl.innerHTML=`<img src="${DATA.logo}" style="width:100%;height:100%;object-fit:contain">`;
+  else lsmiEl.innerHTML=`<span style="font-size:10px;font-weight:800;color:#fff">LSMI</span>`;
+
+  // Tabla posiciones completa — campos: pos, equipo, pj, pg, pe, pp, gf, gc, dg, pts
   const pos=(DATA.posiciones&&DATA.posiciones[divNombre])||[];
   const tbl=document.getElementById('scPosTbl');
   tbl.innerHTML='';
   pos.forEach((p,i)=>{
     const tr=document.createElement('tr');
     if(p.equipo===equipo) tr.className='sc-me';
-    tr.innerHTML=`<td style="color:rgba(255,255,255,.35)">${i+1}</td><td>${p.equipo}</td><td>${p.pj}</td><td>${p.g}</td><td>${p.e}</td><td>${p.p}</td><td>${p.gf}</td><td>${p.gc}</td><td style="font-weight:800;color:#fff">${p.pts}</td>`;
+    tr.innerHTML=`<td style="color:rgba(255,255,255,.35)">${p.pos||i+1}</td><td>${p.equipo}</td><td>${p.pj}</td><td>${p.pg}</td><td>${p.pe}</td><td>${p.pp}</td><td>${p.gf}</td><td>${p.gc}</td><td style="font-weight:800;color:#fff">${p.pts}</td>`;
     tbl.appendChild(tr);
   });
 
-  // Disciplina
-  const disc=document.getElementById('scDisc');
-  disc.innerHTML='';
-  if(td.top_cards&&td.top_cards.length){
-    td.top_cards.forEach((c,i)=>{
-      let badges='';
-      if(c.rojas>0) badges+=`<span class="sc-card-badge sc-cb-r">${c.rojas}<span style="font-size:7px">R</span></span>`;
-      if(c.dobles>0) badges+=`<span class="sc-card-badge sc-cb-d">${c.dobles}<span style="font-size:7px">D</span></span>`;
-      if(c.amarillas>0) badges+=`<span class="sc-card-badge sc-cb-a">${c.amarillas}<span style="font-size:7px">A</span></span>`;
-      disc.innerHTML+=`<div class="sc-disc-row"><span class="sc-disc-num">${i+1}</span><span class="sc-disc-name">${c.nombre}</span><div style="display:flex;gap:3px">${badges}</div></div>`;
-    });
-  } else {
-    disc.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:6px 0">Sin tarjetas registradas</div>';
-  }
-
-  // Últimos resultados
+  // Partidos jugados (últimos)
   const res=document.getElementById('scRes');
   res.innerHTML='';
   const ultimos=(DATA.ultimos_por_equipo||{})[equipo]||[];
   if(ultimos.length){
     ultimos.forEach(u=>{
-      res.innerHTML+=`<div class="sc-match-row"><span>vs ${u.rival}</span><span class="sc-mscr">${u.gf}–${u.gc}</span><span class="sc-mdot ${u.resultado}">${u.resultado}</span></div>`;
+      res.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.45)">vs ${u.rival}</span><span class="sc-mscr">${u.gf}–${u.gc}</span><span class="sc-mdot ${u.resultado}">${u.resultado}</span></div>`;
     });
   } else {
-    res.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35)">Sin resultados</div>';
+    res.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin partidos registrados</div>';
   }
 
-  // Próximos partidos
+  // Próximo partido (solo el primero)
   const nxt=document.getElementById('scNext');
   nxt.innerHTML='';
   const prox=(DATA.horarios||[]).filter(p=>p.local===equipo||p.visitante===equipo);
   const now=new Date();
   const futuros=prox.filter(p=>{const h=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');return now<=new Date(p.fecha_iso+'T'+h+':00');});
   if(futuros.length){
-    futuros.forEach(p=>{
-      const rival=p.local===equipo?p.visitante:p.local;
-      nxt.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.4);font-size:9px">${p.dia}</span><span>vs ${rival}</span><span style="font-size:9px;color:rgba(255,255,255,.5)">${p.hora}</span></div>`;
-    });
+    const p=futuros[0];
+    const rival=p.local===equipo?p.visitante:p.local;
+    const esLocal=p.local===equipo;
+    nxt.innerHTML=`<div style="background:rgba(255,255,255,.05);border-radius:8px;padding:10px 12px">
+      <div style="font-size:9px;color:rgba(255,255,255,.35);margin-bottom:6px">${p.dia} · ${p.hora} · ${p.cancha}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:800">
+        <span style="color:${esLocal?'#fff':'rgba(255,255,255,.5)'}">${p.local}</span>
+        <span style="color:rgba(255,255,255,.3);font-size:11px">VS</span>
+        <span style="color:${!esLocal?'#fff':'rgba(255,255,255,.5)'}">${p.visitante}</span>
+      </div>
+    </div>`;
   } else {
-    nxt.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35)">Sin próximos partidos</div>';
+    nxt.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin próximos partidos programados</div>';
   }
 
-  // Sponsor pie
-  const sp=document.getElementById('scSponsor');
-  sp.textContent=SPONSORS.length?'Con el auspicio de: '+SPONSORS.map(s=>s.nombre).join(' · '):'';
+  // Próximos rivales
+  const riv=document.getElementById('scRivales');
+  riv.innerHTML='';
+  const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
+  if(rivProx.length){
+    rivProx.forEach(r=>{
+      riv.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.35);font-size:9px;width:50px;flex-shrink:0">${r.fecha_label}</span><span style="color:rgba(255,255,255,.75)">vs ${r.rival}</span></div>`;
+    });
+  } else {
+    riv.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin rivales programados</div>';
+  }
+
+  // Sponsors
+  const spSec=document.getElementById('scSponsorsSection');
+  const spLogos=document.getElementById('scSponsorsLogos');
+  spLogos.innerHTML='';
+  if(SPONSORS.length){
+    spSec.style.display='block';
+    SPONSORS.forEach(s=>{
+      spLogos.innerHTML+=`<div style="background:${s.bg||'rgba(255,255,255,.1)'};border-radius:6px;padding:4px 10px;font-size:11px;font-weight:800;color:${s.color||'#fff'};font-family:\'Barlow Condensed\',sans-serif">${s.nombre}</div>`;
+    });
+    document.getElementById('scSponsorText').textContent='';
+  } else {
+    spSec.style.display='none';
+    document.getElementById('scSponsorText').textContent='';
+  }
 
   document.getElementById('shareOverlay').classList.add('open');
 }
