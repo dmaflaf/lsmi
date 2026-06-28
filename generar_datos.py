@@ -139,7 +139,13 @@ def leer_resultados(wb_pos):
 def leer_sancionados(ruta):
     DIV_MAP={norm('1era DIVISIÓN'):'1era División',norm('2da DIVISIÓN'):'2da División',norm('3era DIVISIÓN 1'):'3era División C1',norm('3era DIVISIÓN 2'):'3era División C2'}
     wb=openpyxl.load_workbook(ruta,read_only=True,data_only=True); ws=wb[wb.sheetnames[0]]; sanc={}; div_actual=None
+    fecha_actualizacion=''
     for row in ws.iter_rows(values_only=True):
+        # Buscar fecha de actualización en fila con "Actualizado" (col índice 7) y fecha (col 8)
+        if len(row)>8 and row[7]=='Actualizado' and row[8]:
+            val=row[8]
+            fecha_actualizacion=val.strftime('%d/%m/%Y') if hasattr(val,'strftime') else str(val).strip()
+            continue
         c1,c2,c3,c4,c5=row[1],row[2],row[3],row[4],row[5]
         if c1 is None and c2 and isinstance(c2,str):
             c2n=norm(c2)
@@ -155,7 +161,7 @@ def leer_sancionados(ruta):
             else: tipo='leve'
             fase2_str = c5.strftime('%d/%m/%Y') if hasattr(c5,'strftime') else str(c5).strip() if c5 else ''
             sanc[div_actual].append({'numero':numero,'nombre':str(c2).strip(),'club':str(c3).strip(),'sancion':str(c4).strip(),'fase2':fase2_str,'tipo':tipo})
-    return sanc
+    return sanc, fecha_actualizacion
 
 def leer_horarios_json(carpeta):
     """Lee el JSON de horarios exportado del planificador (formato liga_sanmiguel_backup)."""
@@ -246,8 +252,8 @@ def procesar_todo(carpeta):
         wb_pos=openpyxl.load_workbook(pos_ruta,read_only=True,data_only=True)
         posiciones=leer_posiciones(wb_pos); res_partidos=leer_resultados(wb_pos)
 
-    sancionados={}
-    if sanc_ruta: sancionados=leer_sancionados(sanc_ruta)
+    sancionados={}; fecha_sanc=''
+    if sanc_ruta: sancionados,fecha_sanc=leer_sancionados(sanc_ruta)
 
     horarios,proxima_fecha=leer_horarios_json(carpeta)
     safe_print(f"\n[+] Horarios cargados: {len(horarios)} partidos | Proxima: {proxima_fecha}")
@@ -368,7 +374,7 @@ def procesar_todo(carpeta):
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,'posiciones':posiciones,'resultados':res_partidos,
         'sancionados':sancionados,'globalTorneo':global_torneo,'logo':logo_b64,
         'horarios':horarios,'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo,
-        'proximaFecha':proxima_fecha}
+        'proximaFecha':proxima_fecha,'fechaSancionados':fecha_sanc}
 
 def generar_html(datos):
     return HTML.replace('__JSON__', json.dumps(datos, ensure_ascii=False))
@@ -730,8 +736,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
         <div style="display:flex;align-items:center;gap:10px">
           <div id="scLogoLSMI" style="width:36px;height:36px;border-radius:6px;overflow:hidden;flex-shrink:0;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center"></div>
           <div>
-            <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:800;letter-spacing:2px;color:rgba(255,255,255,.6);text-transform:uppercase">Liga San Miguel de Ibarra</div>
-            <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:10px;color:rgba(255,255,255,.4);letter-spacing:1px;text-transform:uppercase" id="scDiv">1era División</div>
+            <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:12px;font-weight:900;letter-spacing:1px;color:#fff;text-transform:uppercase">Liga San Miguel de Ibarra</div>
+            <div style="font-family:\'Barlow Condensed\',sans-serif;font-size:10px;font-weight:700;color:rgba(255,255,255,.7);letter-spacing:1px;text-transform:uppercase" id="scDiv">1era División</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -1218,7 +1224,7 @@ function buildDivPanel(divNombre){
 
   <div id="sub-${divNombre}-sanc" class="sub-panel">
     <div class="panel">
-      <div class="panel-head"><span class="material-symbols-outlined">gavel</span><span class="panel-head-title">Sancionados · ${divNombre}</span><span style="margin-left:auto;font-size:9px;font-weight:600;color:var(--text4);white-space:nowrap">Actualizado: ${DATA.generado}</span></div>
+      <div class="panel-head"><span class="material-symbols-outlined">gavel</span><span class="panel-head-title">Sancionados · ${divNombre}</span><span style="margin-left:auto;font-size:9px;font-weight:600;color:var(--text4);white-space:nowrap">Actualizado: ${DATA.fechaSancionados||DATA.generado}</span></div>
       <div class="panel-body">
         <input type="text" class="search-input" placeholder="Buscar jugador, club o sanción..." oninput="filtrarSanc(this,'sanc-tbl-${divNombre}')">
         ${buildSancionados(divNombre)}
@@ -1324,18 +1330,23 @@ function renderTeam(divNombre,equipo){
     });
   }
 
-  // Próximos rivales — SOLO del Excel de Rivales (solo nombre del rival, sin horario/cancha)
+  // Próximos rivales — excluir los que ya jugaron (partido pasado con resultado en horarios)
   const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
-  let rivalesHTML='<div class="empty">Sin más rivales programados</div>';
-  if(rivProx.length){
-    rivalesHTML='';
-    rivProx.forEach(r=>{
-      rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px">
-        <span style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text3);background:var(--surf);border:1px solid var(--border);padding:3px 8px;border-radius:4px;min-width:30px;text-align:center">${r.fecha_label}</span>
-        <span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray);flex:1">vs ${r.rival}</span>
-      </div>`;
-    });
-  }
+  const nowRiv2=new Date();
+  const jugadosSet=new Set((DATA.horarios||[]).filter(p=>{
+    if(p.local!==equipo&&p.visitante!==equipo) return false;
+    if(p.gl===undefined||p.gl===null) return false;
+    const h2=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');
+    return nowRiv2>new Date(p.fecha_iso+'T'+h2+':00');
+  }).map(p=>p.local===equipo?p.visitante:p.local));
+  const rivPend=rivProx.filter(r=>!jugadosSet.has(r.rival));
+  let rivalesHTML=rivPend.length?'':'<div class="empty">Sin más rivales programados</div>';
+  rivPend.forEach(r=>{
+    rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text3);background:var(--surf);border:1px solid var(--border);padding:3px 8px;border-radius:4px;min-width:30px;text-align:center">${r.fecha_label}</span>
+      <span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray);flex:1">vs ${r.rival}</span>
+    </div>`;
+  });
 
   const maxG3=d.top_scorers[0]?.goles||1;
   let golesH=d.top_scorers.length?'':'<div class="empty">Sin goles</div>';
@@ -1469,16 +1480,24 @@ function abrirShare(equipo,divNombre){
     nxt.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin próximos partidos programados</div>';
   }
 
-  // Próximos rivales
+  // Próximos rivales — excluir rivales cuyo partido ya fue jugado (aparece en horarios pasados con resultado)
   const riv=document.getElementById('scRivales');
   riv.innerHTML='';
   const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
-  if(rivProx.length){
-    rivProx.forEach(r=>{
+  const nowRiv=new Date();
+  const yaJugados=new Set((DATA.horarios||[]).filter(p=>{
+    if(p.local!==equipo&&p.visitante!==equipo) return false;
+    if(p.gl===undefined||p.gl===null) return false;
+    const h=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');
+    return nowRiv>new Date(p.fecha_iso+'T'+h+':00');
+  }).map(p=>p.local===equipo?p.visitante:p.local));
+  const rivPendientes=rivProx.filter(r=>!yaJugados.has(r.rival));
+  if(rivPendientes.length){
+    rivPendientes.forEach(r=>{
       riv.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.35);font-size:9px;width:50px;flex-shrink:0">${r.fecha_label}</span><span style="color:rgba(255,255,255,.75)">vs ${r.rival}</span></div>`;
     });
   } else {
-    riv.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin rivales programados</div>';
+    riv.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin rivales pendientes</div>';
   }
 
   // Sponsors
