@@ -798,13 +798,13 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div class="footer-links">
     <span class="nix">Powered by NIX 26</span>
   </div>
-  <p class="footer-quote">"Fomentando el deporte y la disciplina en la comunidad de Ibarra. Datos proporcionados por la Comisión Técnica LSMI."</p>
+  <p class="footer-quote">"Lealtad al deporte barrial"</p>
 </footer>
 
 <nav class="bottom-nav" id="bottomNav">
   <button class="bnav-item active" data-sub="pos" onclick="switchSub(this,'pos')"><span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1">format_list_numbered</span><span>Posiciones</span></button>
   <button class="bnav-item" data-sub="res" onclick="switchSub(this,'res')"><span class="material-symbols-outlined">calendar_today</span><span>Resultados</span></button>
-  <button class="bnav-item" data-sub="stats" onclick="switchSub(this,'stats')"><span class="material-symbols-outlined">analytics</span><span>Estadísticas</span></button>
+  <button class="bnav-item" data-sub="stats" onclick="switchSub(this,'stats')"><span class="material-symbols-outlined">analytics</span><span>Clubes</span></button>
   <button class="bnav-item" data-sub="sanc" onclick="switchSub(this,'sanc')"><span class="material-symbols-outlined">gavel</span><span>Sancionados</span></button>
 </nav>
 
@@ -1173,7 +1173,7 @@ function buildDivPanel(divNombre){
     <div class="sub-nav-inner">
       <button class="subn-btn active" data-sub="pos" onclick="selectSub('${divNombre}','pos')"><span class="material-symbols-outlined">format_list_numbered</span>Posiciones</button>
       <button class="subn-btn" data-sub="res" onclick="selectSub('${divNombre}','res')"><span class="material-symbols-outlined">calendar_today</span>Resultados</button>
-      <button class="subn-btn" data-sub="stats" onclick="selectSub('${divNombre}','stats')"><span class="material-symbols-outlined">analytics</span>Estadísticas</button>
+      <button class="subn-btn" data-sub="stats" onclick="selectSub('${divNombre}','stats')"><span class="material-symbols-outlined">analytics</span>Clubes</button>
       <button class="subn-btn" data-sub="sanc" onclick="selectSub('${divNombre}','sanc')"><span class="material-symbols-outlined">gavel</span>Sancionados</button>
     </div>
   </div>
@@ -1194,7 +1194,7 @@ function buildDivPanel(divNombre){
 
   <div id="sub-${divNombre}-stats" class="sub-panel">
     <div style="margin-bottom:18px">
-      <div class="s-eyebrow" style="color:${color}">Estadísticas</div>
+      <div class="s-eyebrow" style="color:${color}">Clubes</div>
       <div style="font-family:'Barlow Condensed',sans-serif;font-size:22px;font-weight:900;text-transform:uppercase;color:var(--gray)">Selecciona tu equipo para ver sus datos</div>
     </div>
     <div class="team-sel-wrap">
