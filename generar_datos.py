@@ -1330,16 +1330,10 @@ function renderTeam(divNombre,equipo){
     });
   }
 
-  // Próximos rivales — excluir los que ya jugaron (partido pasado con resultado en horarios)
+  // Próximos rivales — excluir fechas ya jugadas (según DATA.resultados)
   const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
-  const nowRiv2=new Date();
-  const jugadosSet=new Set((DATA.horarios||[]).filter(p=>{
-    if(p.local!==equipo&&p.visitante!==equipo) return false;
-    if(p.gl===undefined||p.gl===null) return false;
-    const h2=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');
-    return nowRiv2>new Date(p.fecha_iso+'T'+h2+':00');
-  }).map(p=>p.local===equipo?p.visitante:p.local));
-  const rivPend=rivProx.filter(r=>!jugadosSet.has(r.rival));
+  const fechasJugadas=new Set(((DATA.resultados||{})[divNombre]||[]).map(r=>r.fecha));
+  const rivPend=rivProx.filter(r=>!fechasJugadas.has(parseInt((r.fecha_label||'').replace(/[^0-9]/g,''))));
   let rivalesHTML=rivPend.length?'':'<div class="empty">Sin más rivales programados</div>';
   rivPend.forEach(r=>{
     rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px">
@@ -1480,18 +1474,12 @@ function abrirShare(equipo,divNombre){
     nxt.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin próximos partidos programados</div>';
   }
 
-  // Próximos rivales — excluir rivales cuyo partido ya fue jugado (aparece en horarios pasados con resultado)
+  // Próximos rivales — excluir fechas ya jugadas (según DATA.resultados)
   const riv=document.getElementById('scRivales');
   riv.innerHTML='';
   const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
-  const nowRiv=new Date();
-  const yaJugados=new Set((DATA.horarios||[]).filter(p=>{
-    if(p.local!==equipo&&p.visitante!==equipo) return false;
-    if(p.gl===undefined||p.gl===null) return false;
-    const h=p.hora==='Sin definir'?'00:00':p.hora.replace('h',':');
-    return nowRiv>new Date(p.fecha_iso+'T'+h+':00');
-  }).map(p=>p.local===equipo?p.visitante:p.local));
-  const rivPendientes=rivProx.filter(r=>!yaJugados.has(r.rival));
+  const fechasJug=new Set(((DATA.resultados||{})[divNombre]||[]).map(r=>r.fecha));
+  const rivPendientes=rivProx.filter(r=>!fechasJug.has(parseInt((r.fecha_label||'').replace(/[^0-9]/g,''))));
   if(rivPendientes.length){
     rivPendientes.forEach(r=>{
       riv.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.35);font-size:9px;width:50px;flex-shrink:0">${r.fecha_label}</span><span style="color:rgba(255,255,255,.75)">vs ${r.rival}</span></div>`;
