@@ -59,11 +59,11 @@ def safe_print(msg):
     except UnicodeEncodeError:
         print(msg.encode('ascii', 'replace').decode('ascii'))
 
-HOJAS_POS = {'1era División':'1era División','2da División':'2da División','3era División C1':'3era División 1','3era División C2':'3era División 2'}
+HOJAS_POS = {'1era División':'1era División','2da División':'2da División','3era División 1':'3era División 1','3era División 2':'3era División 2'}
 DIV_RES      = {v:k for k,v in HOJAS_POS.items()}
-DIV_RIESGO   = {'1era División':4,'2da División':2,'3era División C1':4,'3era División C2':4}
-DIV_CLASSIFY = {'1era División':8,'2da División':8,'3era División C1':8,'3era División C2':8}
-SERIE_TO_DIV = {'A':'1era División','B':'2da División','C1':'3era División C1','C2':'3era División C2'}
+DIV_RIESGO   = {'1era División':4,'2da División':2,'3era División 1':4,'3era División 2':4}
+DIV_CLASSIFY = {'1era División':8,'2da División':8,'3era División 1':8,'3era División 2':8}
+SERIE_TO_DIV = {'A':'1era División','B':'2da División','C1':'3era División 1','C2':'3era División 2'}
 
 def procesar_stats(ruta):
     wb=openpyxl.load_workbook(ruta,read_only=True,data_only=True)
@@ -137,7 +137,7 @@ def leer_resultados(wb_pos):
     return {div:[{'fecha':f,'partidos':ps} for f,ps in sorted(fechas.items(),reverse=True)] for div,fechas in res.items()}
 
 def leer_sancionados(ruta):
-    DIV_MAP={norm('1era DIVISIÓN'):'1era División',norm('2da DIVISIÓN'):'2da División',norm('3era DIVISIÓN 1'):'3era División C1',norm('3era DIVISIÓN 2'):'3era División C2'}
+    DIV_MAP={norm('1era DIVISIÓN'):'1era División',norm('2da DIVISIÓN'):'2da División',norm('3era DIVISIÓN 1'):'3era División 1',norm('3era DIVISIÓN 2'):'3era División 2'}
     wb=openpyxl.load_workbook(ruta,read_only=True,data_only=True); ws=wb[wb.sheetnames[0]]; sanc={}; div_actual=None
     fecha_actualizacion=''
     for row in ws.iter_rows(values_only=True):
@@ -223,7 +223,7 @@ def leer_rivales_proximos(carpeta):
 def buscar_excels(carpeta):
     archivos=[f for f in os.listdir(carpeta) if f.endswith('.xlsx')]
     stats={}
-    claves={'1era División':['1era','primera'],'2da División':['2da','segunda'],'3era División C1':['division_1','3era_division_1','_1_v','g1','c1'],'3era División C2':['division_2','3era_division_2','_2_v','g2','c2']}
+    claves={'1era División':['1era','primera'],'2da División':['2da','segunda'],'3era División 1':['division_1','3era_division_1','_1_v','g1','c1'],'3era División 2':['division_2','3era_division_2','_2_v','g2','c2']}
     for arch in archivos:
         low=arch.lower()
         if 'rivales' in low: continue
@@ -352,6 +352,17 @@ def procesar_todo(carpeta):
             for p in fd['partidos']: total_goles_t+=p['gl']+p['gv']; total_part_t+=1
     prom=round(total_goles_t/total_part_t,2) if total_part_t else 0
 
+    # Contar jugadores desde hoja DATOS (nóminas)
+    total_jugadores = 0
+    for ruta in stats_rutas.values():
+        wb_n = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+        ws_n = wb_n['DATOS']
+        for row in ws_n.iter_rows(min_row=2, values_only=True):
+            if not row[0]: continue
+            for cell in row[1:]:
+                if cell and str(cell).strip():
+                    total_jugadores += 1
+
     all_g,all_c,fp_t,stats_div=[],[],[],[]
     for dn,data in res_stats.items():
         for key,goles in data['_goles_raw'].items():
@@ -365,11 +376,13 @@ def procesar_todo(carpeta):
         tt=sum(d['total_amarillas']+d['total_doble']+d['total_rojas'] for d in data['teamsData'].values())
         ne=len(data['teamsData'])
         stats_div.append({'division':dn,'total_goles':tg,'total_tarjetas':tt,'num_equipos':ne,'promedio_goles_equipo':round(tg/ne,1) if ne else 0})
-    all_g.sort(key=lambda x:-x['goles']); all_c.sort(key=lambda x:-x['_p']); fp_t.sort(key=lambda x:x['total_tarjetas']); stats_div.sort(key=lambda x:-x['total_goles'])
+    all_g.sort(key=lambda x:-x['goles']); all_c.sort(key=lambda x:-x['_p']); fp_t.sort(key=lambda x:x['total_tarjetas'])
+    _DIV_ORDER={'1era División':0,'2da División':1,'3era División 1':2,'3era División 2':3}
+    stats_div.sort(key=lambda x:_DIV_ORDER.get(x['division'],99))
     top_c=[{k:v for k,v in c.items() if k!='_p'} for c in all_c[:15]]
     global_torneo={'top_15_goleadores':all_g[:15],'top_15_amonestados':top_c,'fair_play':fp_t[:20],'ranking_divisiones':stats_div,
         'prom_goles_partido':prom,'total_partidos':total_part_t,'ranking_equipos_amonestados':ranking_eq_amon[:15],
-        'total_equipos':sum(d['num_equipos'] for d in stats_div),'total_tarjetas':sum(d['total_tarjetas'] for d in stats_div),'total_goles':sum(d['total_goles'] for d in stats_div)}
+        'total_equipos':sum(d['num_equipos'] for d in stats_div),'total_tarjetas':sum(d['total_tarjetas'] for d in stats_div),'total_goles':sum(d['total_goles'] for d in stats_div),'total_jugadores':total_jugadores}
     for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None)
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,'posiciones':posiciones,'resultados':res_partidos,
         'sancionados':sancionados,'globalTorneo':global_torneo,'logo':logo_b64,
@@ -711,8 +724,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <button class="nav-btn active" onclick="switchView(this,'global')"><span class="material-symbols-outlined">public</span>Global</button>
     <button class="nav-btn" onclick="switchView(this,'1era División')"><span class="material-symbols-outlined">military_tech</span>1era División</button>
     <button class="nav-btn" onclick="switchView(this,'2da División')"><span class="material-symbols-outlined">workspace_premium</span>2da División</button>
-    <button class="nav-btn" onclick="switchView(this,'3era División C1')"><span class="material-symbols-outlined">star</span>3era C1</button>
-    <button class="nav-btn" onclick="switchView(this,'3era División C2')"><span class="material-symbols-outlined">star_half</span>3era C2</button>
+    <button class="nav-btn" onclick="switchView(this,'3era División 1')"><span class="material-symbols-outlined">star</span>3era Div 1</button>
+    <button class="nav-btn" onclick="switchView(this,'3era División 2')"><span class="material-symbols-outlined">star_half</span>3era Div 2</button>
   </div>
 </nav>
 
@@ -720,8 +733,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div id="view-global" class="view active"></div>
   <div id="view-1era División" class="view"></div>
   <div id="view-2da División" class="view"></div>
-  <div id="view-3era División C1" class="view"></div>
-  <div id="view-3era División C2" class="view"></div>
+  <div id="view-3era División 1" class="view"></div>
+  <div id="view-3era División 2" class="view"></div>
 </main>
 
 <!-- SHARE MODAL -->
@@ -811,11 +824,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 <script>
 const DATA = __JSON__;
-const DC={'1era División':'#c8102e','2da División':'#1d4ed8','3era División C1':'#1a7a3c','3era División C2':'#b8860b'};
-const DR={'1era División':4,'2da División':2,'3era División C1':4,'3era División C2':4};
-const DQ={'1era División':8,'2da División':8,'3era División C1':8,'3era División C2':8};
+const DC={'1era División':'#c8102e','2da División':'#1d4ed8','3era División 1':'#1a7a3c','3era División 2':'#b8860b'};
+const DR={'1era División':4,'2da División':2,'3era División 1':4,'3era División 2':4};
+const DQ={'1era División':8,'2da División':8,'3era División 1':8,'3era División 2':8};
 // Estado de sub-pestaña ACTIVA, uno por división — evita que se pisen entre sí
-const subState={'1era División':'pos','2da División':'pos','3era División C1':'pos','3era División C2':'pos'};
+const subState={'1era División':'pos','2da División':'pos','3era División 1':'pos','3era División 2':'pos'};
 let curDiv='global';
 
 if(DATA.logo) document.getElementById('logoImg').src=DATA.logo;
@@ -944,40 +957,91 @@ function buildGlobal(){
     <div class="s-eyebrow">Temporada 2026</div>
     <h2 class="s-title">Estadística <span>Global</span> del Torneo</h2>
   </div>
-  <div class="bento-grid">
-    <div class="kpi-card accent"><div class="live-dot"></div><span class="kpi-label">Goles Totales</span><div class="kpi-val red">${g.total_goles}</div><span class="material-symbols-outlined kpi-icon">sports_soccer</span></div>
-    <div class="kpi-card"><span class="kpi-label">Equipos</span><div class="kpi-val">${totalEq}</div></div>
-    <div class="kpi-card"><span class="kpi-label">Divisiones</span><div class="kpi-val">${g.ranking_divisiones.length}</div></div>
-    <div class="kpi-card"><span class="kpi-label">Tarjetas Totales</span><div class="kpi-val">${totalT}</div></div>
-    <div class="kpi-card accent"><span class="kpi-label">Goles Líder</span><div class="kpi-val red">${g.top_15_goleadores[0]?.goles||0}</div></div>
-    <div class="kpi-card"><span class="kpi-label">Prom. Goles/Partido</span><div class="kpi-val">${g.prom_goles_partido}</div></div>
+
+  <!-- 2 big combo stat cards -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+    <div class="kpi-card accent" style="padding:14px;display:flex;flex-direction:column;justify-content:space-between;gap:8px">
+      <div class="live-dot" style="position:absolute;top:10px;right:10px"></div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+        <div class="kpi-label" style="font-size:9px">Goles Totales</div>
+        <div class="kpi-val red" style="font-size:32px;line-height:1;margin:0">${g.total_goles}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px">
+        <div style="text-align:center"><div class="kpi-label" style="font-size:8px">Prom/Partido</div><div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:var(--text)">${g.prom_goles_partido}</div></div>
+        <div style="text-align:center"><div class="kpi-label" style="font-size:8px">Goles Líder</div><div style="font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:900;color:var(--red)">${g.top_15_goleadores[0]?.goles||0}</div></div>
+      </div>
+    </div>
+    <div class="kpi-card" style="padding:14px;display:flex;flex-direction:column;justify-content:space-between;gap:8px">
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+        <div class="kpi-label" style="font-size:9px">Equipos</div>
+        <div class="kpi-val red" style="font-size:32px;line-height:1;margin:0">${totalEq}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px">
+        <div style="text-align:center">
+          <div class="kpi-label" style="font-size:8px">Divisiones</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:var(--gold);line-height:1">${g.ranking_divisiones.length}</div>
+        </div>
+        <div style="text-align:center;border-left:1px solid rgba(255,255,255,.08);padding-left:4px">
+          <div class="kpi-label" style="font-size:8px">Jugadores</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:900;color:var(--text);line-height:1">1558</div>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <!-- Division cards clickable -->
   <div class="div-grid" id="gDivCards"></div>
 
-  <div class="panel section-gap">
+  <!-- shortcut cards -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px">
+    <div class="kpi-card" style="cursor:pointer;padding:12px 6px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:4px;min-height:90px" onclick="(()=>{const el=document.getElementById('sec-horarios');window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-130,behavior:'smooth'})})()">
+      <span class="material-symbols-outlined" style="font-size:22px;color:var(--red)">event</span>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text4);text-align:center;line-height:1.2">Horarios &amp; Resultados</div>
+      <span class="material-symbols-outlined" style="font-size:12px;color:var(--text4)">arrow_downward</span>
+    </div>
+    <div class="kpi-card" style="cursor:pointer;padding:12px 6px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:4px;min-height:90px" onclick="(()=>{const el=document.getElementById('sec-goleadores');window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-130,behavior:'smooth'})})()">
+      <span class="material-symbols-outlined" style="font-size:22px;color:var(--gold)">leaderboard</span>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text4);text-align:center;line-height:1.2">Top Goleadores</div>
+      <span class="material-symbols-outlined" style="font-size:12px;color:var(--text4)">arrow_downward</span>
+    </div>
+    <div class="kpi-card" style="cursor:pointer;padding:12px 6px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:4px;min-height:90px" onclick="(()=>{const el=document.getElementById('sec-amonestaciones');window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-130,behavior:'smooth'})})()">
+      <span class="material-symbols-outlined" style="font-size:22px;color:var(--orange)">warning</span>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text4);text-align:center;line-height:1.2">Ranking Amonestados</div>
+      <span class="material-symbols-outlined" style="font-size:12px;color:var(--text4)">arrow_downward</span>
+    </div>
+    <div class="kpi-card" style="cursor:pointer;padding:12px 6px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;gap:4px;min-height:90px" onclick="(()=>{const el=document.getElementById('sec-ranking-eq');window.scrollTo({top:el.getBoundingClientRect().top+window.scrollY-130,behavior:'smooth'})})()">
+      <span class="material-symbols-outlined" style="font-size:22px;color:var(--green)">volunteer_activism</span>
+      <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text4);text-align:center;line-height:1.2">Fair Play &amp; Ranking Eq.</div>
+      <span class="material-symbols-outlined" style="font-size:12px;color:var(--text4)">arrow_downward</span>
+    </div>
+  </div>
+
+  <!-- Full panels below -->
+  <div id="sec-horarios" class="panel section-gap">
     <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">${(()=>{const f=DATA.horarios&&DATA.horarios.length?DATA.horarios[0].fase.match(/Fecha\s*(\d+)/):null;return f?'Fecha '+f[1]:'Fecha Actual';})()}&nbsp;— Horarios & Resultados</span></div>
     <div class="panel-body">${pxHTML}</div>
   </div>
 
-   <div class="grid-2">
+  <div id="sec-goleadores" class="grid-2">
     <div>
       <div class="panel">
         <div class="panel-head"><span class="material-symbols-outlined">leaderboard</span><span class="panel-head-title">Top 15 Goleadores</span></div>
         <div class="panel-body" id="gGol"></div>
       </div>
     </div>
-    <div>
+    <div id="sec-amonestaciones">
       <div class="panel">
         <div class="panel-head"><span class="material-symbols-outlined">warning</span><span class="panel-head-title">Ranking Amonestaciones</span></div>
         <div class="panel-body" id="gTarj"></div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><span class="material-symbols-outlined" style="color:var(--green)">volunteer_activism</span><span class="panel-head-title">Fair Play General</span></div>
-        <div class="panel-body" id="gFP"></div>
-      </div>
     </div>
   </div>
 
+  <div id="sec-ranking-eq">
+  <div class="panel">
+    <div class="panel-head"><span class="material-symbols-outlined" style="color:var(--green)">volunteer_activism</span><span class="panel-head-title">Fair Play General</span></div>
+    <div class="panel-body" id="gFP"></div>
+  </div>
   <div class="panel">
     <div class="panel-head"><span class="material-symbols-outlined">gavel</span><span class="panel-head-title">Ranking Amonestación General — Equipos</span></div>
     <div class="panel-body" style="padding:0">
@@ -994,6 +1058,7 @@ function buildGlobal(){
       </table></div>
     </div>
   </div>
+  </div>
 
   <div class="sponsors-wrap" id="sponsorsPanel" style="display:none">
     <div class="sponsors-title"><span class="material-symbols-outlined" style="font-size:18px">business</span>Empresas Afiliadas</div>
@@ -1007,12 +1072,12 @@ function buildGlobal(){
   const dc=document.getElementById('gDivCards');
   g.ranking_divisiones.forEach((d,i)=>{
     const color=DC[d.division]||'#c8102e';
-    dc.innerHTML+=`<div class="div-card">
+    dc.innerHTML+=`<div class="div-card" style="cursor:pointer" onclick="(()=>{const btn=Array.from(document.querySelectorAll('.nav-btn')).find(b=>(b.getAttribute('onclick')||'').includes('${d.division}'));if(btn)switchView(btn,'${d.division}');})()" title="Ver ${d.division}">
       <div class="div-card-stripe" style="background:${color}"></div>
       <div class="div-card-body">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div><div class="div-card-name" style="color:${color}">${d.division}</div><div class="div-card-eq">${d.num_equipos} Equipos</div></div>
-          <div class="div-card-rank">#${i+1}</div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div class="div-card-rank">#${i+1}</div><span class="material-symbols-outlined" style="font-size:14px;color:${color};opacity:.6">arrow_forward</span></div>
         </div>
         <div class="div-card-stats">
           <div class="div-stat"><div class="div-stat-val" style="color:${color}">${d.total_goles}</div><div class="div-stat-lbl">Goles</div></div>
@@ -1100,7 +1165,7 @@ function buildTablaPos(divNombre){
     <div class="tbl-legend">
       <span><span class="ldot" style="background:var(--green)"></span>Clasificación Fase 3 (top ${clf})</span>
       <span><span class="ldot" style="background:var(--orange)"></span>Zona de riesgo (últimos ${rsk})</span>
-      <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DF  GC  GF  FAIR PLAY</span>
+      <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DF  EFE  FAIR PLAY</span>
     </div></div>`;
 }
 
@@ -1162,7 +1227,7 @@ function buildDivPanel(divNombre){
   <div class="div-hero" style="--accent:${color}">
     <div>
       <h2 class="div-hero-title" style="color:${color}">${divNombre}</h2>
-      <div class="div-hero-meta">Fecha ${meta.ultima_fecha} · ${ne} equipos</div>
+      <div class="div-hero-meta">Fecha ${{ '1era División':20,'2da División':18,'3era División 1':18,'3era División 2':16}[divNombre]||meta.ultima_fecha} · ${ne} equipos</div>
     </div>
     <div class="div-kpis">
       <div style="text-align:center"><div class="div-kpi-val" style="color:${color}">${totalG}</div><div class="div-kpi-lbl">Goles</div></div>
@@ -1409,7 +1474,7 @@ function renderTeam(divNombre,equipo){
 }
 
 buildGlobal();
-['1era División','2da División','3era División C1','3era División C2'].forEach(div=>buildDivPanel(div));
+['1era División','2da División','3era División 1','3era División 2'].forEach(div=>buildDivPanel(div));
 
 // ---- SHARE FUNCTIONS ----
 const SPONSORS=[];// Agrega sponsors: {nombre:'Empresa',ini:'EM',bg:'#eeedfe',color:'#3c3489'}
