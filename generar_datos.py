@@ -536,6 +536,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .zone-top td.eq-td{border-left:3px solid var(--gold)}
 .tbl-legend{display:flex;gap:14px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text4);background:var(--surf2)}
 .ldot{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:middle}
+.ldot-desempate{margin-left:auto;background:#0ff3;border:1px solid #0dd;color:#0dd;border-radius:5px;padding:2px 10px;font-size:10px;font-weight:700;letter-spacing:.4px}
 
 .fecha-block{margin-bottom:18px}
 .fecha-lbl{font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--text3);padding:5px 12px;background:var(--surf2);border:1px solid var(--border);border-radius:5px;margin-bottom:10px;display:inline-block}
@@ -1099,6 +1100,7 @@ function buildTablaPos(divNombre){
     <div class="tbl-legend">
       <span><span class="ldot" style="background:var(--green)"></span>Clasificación Fase 3 (top ${clf})</span>
       <span><span class="ldot" style="background:var(--orange)"></span>Zona de riesgo (últimos ${rsk})</span>
+      <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DF  GC  GF  FAIR PLAY</span>
     </div></div>`;
 }
 
