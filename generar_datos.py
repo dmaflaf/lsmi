@@ -112,13 +112,16 @@ def leer_posiciones(wb_pos):
     pos={}
     for div,hoja in HOJAS_POS.items():
         if hoja not in wb_pos.sheetnames: continue
-        ws=wb_pos[hoja]; tabla=[]; ok=False
+        ws=wb_pos[hoja]; tabla=[]; ok=False; tiene_por=False
         for row in ws.iter_rows(values_only=True):
-            if row[0]=='POS' and row[1]=='EQUIPO': ok=True; continue
+            if row[0]=='POS' and row[1]=='EQUIPO':
+                ok=True; tiene_por=(len(row)>10 and str(row[10]).strip().upper()=='POR'); continue
             if not ok: continue
             if row[0] and isinstance(row[0],(int,float)) and row[1] and isinstance(row[1],str) and len(str(row[1]).strip())>1:
                 if 'PJ=' in str(row[1]) or 'Puntuación' in str(row[1]): break
-                tabla.append({'pos':int(row[0]),'equipo':str(row[1]).strip(),'pj':int(row[2] or 0),'pg':int(row[3] or 0),'pe':int(row[4] or 0),'pp':int(row[5] or 0),'gf':int(row[6] or 0),'gc':int(row[7] or 0),'dg':int(row[8] or 0),'pts':int(row[9] or 0)})
+                eq={'pos':int(row[0]),'equipo':str(row[1]).strip(),'pj':int(row[2] or 0),'pg':int(row[3] or 0),'pe':int(row[4] or 0),'pp':int(row[5] or 0),'gf':int(row[6] or 0),'gc':int(row[7] or 0),'dg':int(row[8] or 0),'pts':int(row[9] or 0)}
+                if tiene_por: eq['por']=round(float(row[10] or 0),2)
+                tabla.append(eq)
         pos[div]=tabla
     return pos
 
@@ -1140,6 +1143,7 @@ function buildTablaPos(divNombre){
   const clf=DQ[divNombre]||8, rsk=DR[divNombre]||3;
   if(!tabla.length) return`<div class="empty">Sin tabla disponible</div>`;
   const n=tabla.length;
+  const tienePor=tabla.some(eq=>eq.por!==undefined);
   let rows='';
   tabla.forEach(eq=>{
     const pos=eq.pos;
@@ -1150,6 +1154,7 @@ function buildTablaPos(divNombre){
       <td class="w30">${pb(pos,n,clf,rsk)}</td>
       <td class="eq-td">${eq.equipo}</td>
       <td class="w30 pts-td" style="color:${color}">${eq.pts}</td>
+      ${tienePor?`<td class="w30">${(eq.por!==undefined?eq.por:0).toFixed(2)}</td>`:''}
       <td class="w30 ${dgCls}">${eq.dg>0?'+':''}${eq.dg}</td>
       <td class="w30">${eq.pj}</td>
       <td class="w30">${eq.pg}</td><td class="w30">${eq.pe}</td><td class="w30">${eq.pp}</td>
@@ -1159,7 +1164,7 @@ function buildTablaPos(divNombre){
   return`<div class="pos-wrap"><table class="pos-table">
     <thead><tr>
       <th class="w30">#</th><th class="eq-h">Equipo</th>
-      <th class="w30" style="color:${color}">PTS</th><th class="w30">DG</th><th class="w30">PJ</th>
+      <th class="w30" style="color:${color}">PTS</th>${tienePor?'<th class="w30">%</th>':''}<th class="w30">DG</th><th class="w30">PJ</th>
       <th class="w30">G</th><th class="w30">E</th><th class="w30">P</th><th class="w30">GF</th><th class="w30">GC</th>
     </tr></thead><tbody>${rows}</tbody></table>
     <div class="tbl-legend">
