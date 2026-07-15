@@ -1592,19 +1592,32 @@ function abrirShare(equipo,divNombre){
     nxt.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin próximos partidos programados</div>';
   }
 
-  // Próximos rivales — excluir fechas ya jugadas (según DATA.resultados)
+  // Próximos rivales — Excel respaldo + horarios.json
   const riv=document.getElementById('scRivales');
   riv.innerHTML='';
-  const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
-  const fechasJug=new Set(((DATA.resultados||{})[divNombre]||[]).map(r=>r.fecha));
-  const rivPendientes=rivProx.filter(r=>!fechasJug.has(parseInt((r.fecha_label||'').replace(/[^0-9]/g,''))));
-  if(rivPendientes.length){
-    rivPendientes.forEach(r=>{
-      riv.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.35);font-size:9px;width:50px;flex-shrink:0">${r.fecha_label}</span><span style="color:rgba(255,255,255,.75)">vs ${r.rival}</span></div>`;
-    });
-  } else {
+  const rivProxSc=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
+  const fechasJugSc=new Set(((DATA.resultados||{})[divNombre]||[]).map(r=>r.fecha));
+  const rivPendientes=rivProxSc.filter(r=>!fechasJugSc.has(parseInt((r.fecha_label||'').replace(/[^0-9]/g,''))));
+  const nowSc=new Date();
+  const FASE_LABEL_SC={'Ida - 4tos':'4tos Final — IDA','Vuelta - 4tos':'4tos Final — VUELTA'};
+  const proxHorSc=(DATA.horarios||[]).filter(p=>{
+    if(p.division!==divNombre) return false;
+    if(p.local!==equipo&&p.visitante!==equipo) return false;
+    const hf=(p.hora==='Sin definir'?'00:00':p.hora.replace('h',':'));
+    return nowSc<=new Date(p.fecha_iso+'T'+hf+':00');
+  }).slice(0,3);
+  if(!rivPendientes.length&&!proxHorSc.length){
     riv.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin rivales pendientes</div>';
   }
+  rivPendientes.forEach(r=>{
+    riv.innerHTML+=`<div class="sc-match-row"><div class="sc-match-bar E"></div><span style="color:rgba(255,255,255,.35);font-size:9px;width:50px;flex-shrink:0;padding:7px 4px 7px 8px">${r.fecha_label}</span><span class="sc-match-rival" style="color:rgba(255,255,255,.75)">vs ${r.rival}</span></div>`;
+  });
+  proxHorSc.forEach(p=>{
+    const esLocalSc=p.local===equipo;
+    const rivalSc=esLocalSc?p.visitante:p.local;
+    const faseSc=FASE_LABEL_SC[p.fase]||p.fase||'Próximo';
+    riv.innerHTML+=`<div class="sc-match-row" style="flex-direction:column;align-items:flex-start;gap:2px;padding:6px 8px"><div style="font-size:8px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:${color};margin-bottom:1px">${faseSc}</div><div style="display:flex;align-items:center;gap:6px;width:100%"><span class="sc-match-rival" style="color:rgba(255,255,255,.85);font-weight:700">vs ${rivalSc}</span><span style="font-size:8px;color:rgba(255,255,255,.3);flex-shrink:0">${p.dia}</span><span style="font-size:8px;color:rgba(255,255,255,.25);flex-shrink:0;margin-left:auto">${esLocalSc?'Local':'Visita'}</span></div></div>`;
+  });
 
   // Sponsors
   const spSec=document.getElementById('scSponsorsSection');
