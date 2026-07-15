@@ -655,10 +655,13 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .sc-pos-tbl{width:100%;border-collapse:collapse;font-size:10px}
 .sc-pos-tbl th{color:rgba(255,255,255,.3);font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:0 4px 5px;text-align:center}
 .sc-pos-tbl th:nth-child(2){text-align:left}
+.sc-pos-tbl th:last-child{color:#facc15}
 .sc-pos-tbl td{padding:4px;color:rgba(255,255,255,.7);text-align:center;border-top:.5px solid rgba(255,255,255,.05)}
 .sc-pos-tbl td:nth-child(2){text-align:left;color:#fff;font-weight:700}
+.sc-pos-tbl td:last-child{font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;color:#facc15}
 .sc-pos-tbl tr.sc-me td{background:rgba(200,16,46,.18)}
 .sc-pos-tbl tr.sc-me td:nth-child(2){color:#facc15}
+.sc-pos-tbl tr.sc-me td:last-child{color:#fff;background:rgba(200,16,46,.35);border-radius:4px}
 /* disciplina en card */
 .sc-disc-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:.5px solid rgba(255,255,255,.06)}
 .sc-disc-row:last-child{border-bottom:none}
@@ -669,11 +672,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .sc-cb-d{background:rgba(184,134,11,.25);color:#facc15}
 .sc-cb-a{background:rgba(184,134,11,.15);color:#f0c040}
 /* resultados y próximos */
-.sc-match-row{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.65);padding:4px 0;border-bottom:.5px solid rgba(255,255,255,.06)}
-.sc-match-row:last-child{border-bottom:none}
-.sc-mscr{font-size:13px;font-weight:800;color:#fff;min-width:40px;text-align:center}
-.sc-mdot{width:17px;height:17px;border-radius:50%;font-size:8px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;color:#fff;flex-shrink:0}
-.sc-mdot.V{background:#1d9e75}.sc-mdot.E{background:#888780}.sc-mdot.D{background:#e24b4a}
+.sc-match-row{display:flex;align-items:center;gap:0;margin-bottom:5px;border-radius:7px;overflow:hidden;background:rgba(255,255,255,.04)}
+.sc-match-row:last-child{margin-bottom:0}
+.sc-match-bar{width:3px;flex-shrink:0;align-self:stretch}
+.sc-match-bar.G{background:#1d9e75}.sc-match-bar.E{background:#888780}.sc-match-bar.P{background:#e24b4a}
+.sc-match-rival{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:rgba(255,255,255,.6);padding:7px 8px}
+.sc-mscr{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:900;color:#fff;min-width:46px;text-align:center;flex-shrink:0;padding:0 6px}
+.sc-mres{font-size:8px;font-weight:800;letter-spacing:.5px;padding:3px 7px;border-radius:3px;flex-shrink:0;margin-right:7px;text-transform:uppercase}
+.sc-mres.G{background:rgba(29,158,117,.25);color:#4ade80}
+.sc-mres.E{background:rgba(136,135,128,.2);color:#d1d0cc}
+.sc-mres.P{background:rgba(226,75,74,.2);color:#f87171}
 /* footer card */
 .sc-foot{background:rgba(255,255,255,.04);padding:8px 14px;display:flex;align-items:center;justify-content:space-between}
 .sc-foot-brand{font-size:9px;color:rgba(255,255,255,.3);letter-spacing:1.5px;text-transform:uppercase;font-weight:700}
@@ -766,7 +774,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <div class="sc-sec">
         <div class="sc-stitle">Tabla de posiciones</div>
         <table class="sc-pos-tbl"><thead><tr>
-          <th>#</th><th>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>Pts</th>
+          <th>#</th><th>Equipo</th><th>PJ</th><th>G</th><th>E</th><th>P</th><th>GF</th><th>GC</th><th>DF</th><th>Pts</th>
         </tr></thead><tbody id="scPosTbl"></tbody></table>
       </div>
       <!-- PRÓXIMO PARTIDO -->
@@ -1508,7 +1516,8 @@ function abrirShare(equipo,divNombre){
   pos.forEach((p,i)=>{
     const tr=document.createElement('tr');
     if(p.equipo===equipo) tr.className='sc-me';
-    tr.innerHTML=`<td style="color:rgba(255,255,255,.35)">${p.pos||i+1}</td><td>${p.equipo}</td><td>${p.pj}</td><td>${p.pg}</td><td>${p.pe}</td><td>${p.pp}</td><td>${p.gf}</td><td>${p.gc}</td><td style="font-weight:800;color:#fff">${p.pts}</td>`;
+    const df=p.dg!==undefined?(p.dg>0?'+'+p.dg:p.dg):'-';
+    tr.innerHTML=`<td style="color:rgba(255,255,255,.35)">${p.pos||i+1}</td><td>${p.equipo}</td><td>${p.pj}</td><td>${p.pg}</td><td>${p.pe}</td><td>${p.pp}</td><td>${p.gf}</td><td>${p.gc}</td><td style="color:rgba(255,255,255,.4)">${df}</td><td>${p.pts}</td>`;
     tbl.appendChild(tr);
   });
 
@@ -1518,7 +1527,8 @@ function abrirShare(equipo,divNombre){
   const ultimos=(DATA.ultimos_por_equipo||{})[equipo]||[];
   if(ultimos.length){
     ultimos.forEach(u=>{
-      res.innerHTML+=`<div class="sc-match-row"><span style="color:rgba(255,255,255,.45)">vs ${u.rival}</span><span class="sc-mscr">${u.gf}–${u.gc}</span><span class="sc-mdot ${u.resultado}">${u.resultado}</span></div>`;
+      const rlbl={'G':'Victoria','E':'Empate','P':'Derrota'}[u.resultado]||u.resultado;
+      res.innerHTML+=`<div class="sc-match-row"><div class="sc-match-bar ${u.resultado}"></div><span class="sc-match-rival">vs ${u.rival}</span><span class="sc-mscr">${u.gf}–${u.gc}</span><span class="sc-mres ${u.resultado}">${rlbl}</span></div>`;
     });
   } else {
     res.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin partidos registrados</div>';
