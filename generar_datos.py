@@ -922,44 +922,52 @@ function buildGlobal(){
   const horarios=DATA.horarios||[];
   let pxHTML='<div class="empty">Sin horarios cargados aún</div>';
   if(horarios.length){
-    const byDiv={};
-    horarios.forEach(p=>{ if(!byDiv[p.division]) byDiv[p.division]=[]; byDiv[p.division].push(p); });
+    const byFase={};
+    horarios.forEach(p=>{
+      const fase=p.fase||'General';
+      if(!byFase[fase]) byFase[fase]={};
+      if(!byFase[fase][p.division]) byFase[fase][p.division]=[];
+      byFase[fase][p.division].push(p);
+    });
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA'};
+    const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
+    const now=new Date();
     pxHTML='';
-    Object.entries(byDiv).forEach(([div,parts])=>{
-      const color=DC[div]||'#c8102e';
-      pxHTML+=`<div style="margin-bottom:18px">`;
-      pxHTML+=`<div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:${color};margin-bottom:8px;padding-left:2px">${div}</div>`;
-      const now=new Date();
-      parts.forEach(p=>{
-        const horaTbd=p.hora==='Sin definir';
-        const canchaTbd=p.cancha==='Sin definir';
-        const horaFmt=horaTbd?'00:00':p.hora.replace('h',':');
-        const matchDt=new Date(p.fecha_iso+'T'+horaFmt+':00');
-        const isPast=now>matchDt;
-        const hasResult=p.gl!==undefined&&p.gl!==null;
-        if(isPast&&hasResult){
-          const gl=p.gl,gv=p.gv;
-          const lw=gl>gv,vw=gv>gl;
-          pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color}">`;
-          pxHTML+=`<div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>`;
-          pxHTML+=`<div class="fixture-teams">
-            <div class="fixture-team" style="${lw?'font-weight:900;color:'+color:''}">${p.local}</div>
-            <div class="fixture-vs" style="font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:4px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px;box-shadow:inset 0 1px 2px rgba(0,0,0,.05)">${gl} – ${gv}</div>
-            <div class="fixture-team" style="${vw?'font-weight:900;color:'+color:''}">${p.visitante}</div>
-          </div>`;
-          pxHTML+=`<div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
-          if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
-          pxHTML+=`</div>`;
-        } else {
-          pxHTML+=`<div class="fixture-card" style="--accent:${color}">`;
-          pxHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
-          pxHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
-          pxHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
-          if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
-          pxHTML+=`</div>`;
-        }
+    Object.entries(byFase).forEach(([fase,divs])=>{
+      const label=FASE_LABEL[fase]||fase;
+      const dates=FASE_DATES[fase]||'';
+      pxHTML+=`<div style="margin-bottom:24px"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(135deg,rgba(200,16,46,.15),rgba(200,16,46,.05));border-left:3px solid var(--red);border-radius:0 8px 8px 0;margin-bottom:14px"><span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:var(--red)">${label}</span><span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;color:var(--text4)">${dates}</span></div>`;
+      Object.entries(divs).forEach(([div,parts])=>{
+        const color=DC[div]||'#c8102e';
+        pxHTML+=`<div style="margin-bottom:18px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:${color};margin-bottom:8px;padding-left:2px">${div}</div>`;
+        parts.forEach(p=>{
+          const horaTbd=p.hora==='Sin definir';
+          const canchaTbd=p.cancha==='Sin definir';
+          const horaFmt=horaTbd?'00:00':p.hora.replace('h',':');
+          const matchDt=new Date(p.fecha_iso+'T'+horaFmt+':00');
+          const isPast=now>matchDt;
+          const hasResult=p.gl!==undefined&&p.gl!==null;
+          if(isPast&&hasResult){
+            const gl=p.gl,gv=p.gv;
+            const lw=gl>gv,vw=gv>gl;
+            pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color}">`;
+            pxHTML+=`<div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>`;
+            pxHTML+=`<div class="fixture-teams"><div class="fixture-team" style="${lw?'font-weight:900;color:'+color:''}">${p.local}</div><div class="fixture-vs" style="font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:4px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px">${gl} – ${gv}</div><div class="fixture-team" style="${vw?'font-weight:900;color:'+color:''}">${p.visitante}</div></div>`;
+            pxHTML+=`<div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+            if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
+            pxHTML+=`</div>`;
+          } else {
+            pxHTML+=`<div class="fixture-card" style="--accent:${color}">`;
+            pxHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
+            pxHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
+            pxHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+            if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
+            pxHTML+=`</div>`;
+          }
+        });
+        pxHTML+=`</div>`; // cierra div-division
       });
-      pxHTML+=`</div>`;
+      pxHTML+=`</div>`; // cierra div-fase
     });
   }
 
@@ -1029,7 +1037,7 @@ function buildGlobal(){
 
   <!-- Full panels below -->
   <div id="sec-horarios" class="panel section-gap">
-    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">${(()=>{const f=DATA.horarios&&DATA.horarios.length?DATA.horarios[0].fase.match(/Fecha\s*(\d+)/):null;return f?'Fecha '+f[1]:'Fecha Actual';})()}&nbsp;— Horarios & Resultados</span></div>
+    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">Fase 3 &mdash; 4tos de Final &nbsp;·&nbsp; Horarios & Resultados</span></div>
     <div class="panel-body">${pxHTML}</div>
   </div>
 
@@ -1410,15 +1418,43 @@ function renderTeam(divNombre,equipo){
     });
   }
 
-  // Próximos rivales — excluir fechas ya jugadas (según DATA.resultados)
+  // Próximos rivales — primero desde rivalesProximos (Excel), luego desde horarios.json
   const rivProx=(DATA.rivalesProximos[divNombre]||{})[equipo]||[];
   const fechasJugadas=new Set(((DATA.resultados||{})[divNombre]||[]).map(r=>r.fecha));
   const rivPend=rivProx.filter(r=>!fechasJugadas.has(parseInt((r.fecha_label||'').replace(/[^0-9]/g,''))));
-  let rivalesHTML=rivPend.length?'':'<div class="empty">Sin más rivales programados</div>';
+
+  // Complementar con horarios.json (4tos, semis, etc.)
+  const now2=new Date();
+  const proxHorarios=(DATA.horarios||[]).filter(p=>{
+    if(p.division!==divNombre) return false;
+    if(p.local!==equipo&&p.visitante!==equipo) return false;
+    const hFmt=(p.hora==='Sin definir'?'00:00':p.hora.replace('h',':'));
+    return now2<=new Date(p.fecha_iso+'T'+hFmt+':00');
+  }).slice(0,3);
+
+  let rivalesHTML='';
+  if(rivPend.length===0&&proxHorarios.length===0){
+    rivalesHTML='<div class="empty">Sin más rivales programados</div>';
+  }
   rivPend.forEach(r=>{
     rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px">
       <span style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text3);background:var(--surf);border:1px solid var(--border);padding:3px 8px;border-radius:4px;min-width:30px;text-align:center">${r.fecha_label}</span>
       <span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray);flex:1">vs ${r.rival}</span>
+    </div>`;
+  });
+  proxHorarios.forEach(p=>{
+    const esLocal=p.local===equipo;
+    const rival=esLocal?p.visitante:p.local;
+    const faseLbl=p.fase||'Próximo';
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA'};
+    const faseDisplay=FASE_LABEL[faseLbl]||faseLbl;
+    rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px;border-left:3px solid ${color}">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:${color};margin-bottom:3px">${faseDisplay}</div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray)">vs ${rival}</div>
+        <div style="font-size:10px;color:var(--text4);margin-top:2px">${p.dia} · ${p.hora} · ${p.cancha}</div>
+      </div>
+      <span style="font-size:10px;color:var(--text4);flex-shrink:0">${esLocal?'Local':'Visita'}</span>
     </div>`;
   });
 
