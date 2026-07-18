@@ -299,8 +299,10 @@ def procesar_todo(carpeta):
     rivales_prox = nuevos_rivales
 
     # Enriquecer horarios con resultado si el partido ya fue jugado
-    # Busca en ambas direcciones (local/visitante pueden estar invertidos entre horarios y RESULTADOS)
+    # Solo aplica a partidos de fase regular (no 4tos, semis, finales)
+    FASES_SIN_RESULTADO = {'ida - 4tos','vuelta - 4tos','ida - semis','vuelta - semis','final'}
     for p in horarios:
+        if (p.get('fase','').lower() in FASES_SIN_RESULTADO): continue
         div = p['division']
         loc = simplificar_nombre(p['local'])
         vis = simplificar_nombre(p['visitante'])
