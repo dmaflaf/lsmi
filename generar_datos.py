@@ -65,6 +65,24 @@ DIV_RIESGO   = {'1era División':4,'2da División':2,'3era División 1':4,'3era 
 DIV_CLASSIFY = {'1era División':8,'2da División':8,'3era División 1':8,'3era División 2':8}
 SERIE_TO_DIV = {'A':'1era División','B':'2da División','C1':'3era División 1','C2':'3era División 2'}
 
+# Equipos retirados — se eliminan de la tabla de posiciones
+EQUIPOS_RETIRADOS = {
+    '3era División 1': {'Universitarios'},
+    '3era División 2': {'Racing de Avellaneda'},
+}
+
+# Grupos fijos para la liguilla de Descenso (equipos pre-asignados)
+GRUPOS_DESCENSO = {
+    '1era División': {
+        'Grupo 1': ['Pradera','Chacarita Jr','Cordovez','Fenix'],
+        # Grupo 2 = el resto de los equipos en descenso (pos > 8)
+    },
+    '2da División': {
+        'Grupo 1': ['Yuyucocha','Red Bull','Athlas Senior'],
+        # Grupo 2 = el resto
+    },
+}
+
 def procesar_stats(ruta):
     wb=openpyxl.load_workbook(ruta,read_only=True,data_only=True)
     ws_g=wb['GOLEADORES']; goles_pj={}; uf=0
@@ -119,9 +137,13 @@ def leer_posiciones(wb_pos):
             if not ok: continue
             if row[0] and isinstance(row[0],(int,float)) and row[1] and isinstance(row[1],str) and len(str(row[1]).strip())>1:
                 if 'PJ=' in str(row[1]) or 'Puntuación' in str(row[1]): break
-                eq={'pos':int(row[0]),'equipo':str(row[1]).strip(),'pj':int(row[2] or 0),'pg':int(row[3] or 0),'pe':int(row[4] or 0),'pp':int(row[5] or 0),'gf':int(row[6] or 0),'gc':int(row[7] or 0),'dg':int(row[8] or 0),'pts':int(row[9] or 0)}
-                if tiene_por: eq['por']=round(float(row[10] or 0),2)
+                nombre=str(row[1]).strip()
+                if nombre in EQUIPOS_RETIRADOS.get(div,set()): continue
+                eq={'pos':int(row[0]),'equipo':nombre,'pj':int(row[2] or 0),'pg':int(row[3] or 0),'pe':int(row[4] or 0),'pp':int(row[5] or 0),'gf':int(row[6] or 0),'gc':int(row[7] or 0),'dg':int(row[8] or 0),'pts':int(row[9] or 0)}
+                if tiene_por and not div.startswith('3era'): eq['por']=round(float(row[10] or 0),2)
                 tabla.append(eq)
+        # Renumerar posiciones después de eliminar retirados
+        for i,eq in enumerate(tabla): eq['pos']=i+1
         pos[div]=tabla
     return pos
 
@@ -201,6 +223,72 @@ def leer_horarios_json(carpeta):
     proxima = raw.get('proxima_fecha','')
     return partidos, proxima
 
+def leer_descenso_json(carpeta, posiciones, ascenso_teams=None):
+    """Lee horarios_descenso.json y calcula standings de la liguilla por grupo."""
+    from datetime import date as _d
+    hoy = _d.today()
+    ruta = os.path.join(carpeta, 'horarios_descenso.json')
+    try:
+        with open(ruta, encoding='utf-8') as f: raw = json.load(f)
+    except Exception: raw = {'data':[]}
+    DIAS_ES={'Mon':'Lun','Tue':'Mar','Wed':'Mié','Thu':'Jue','Fri':'Vie','Sat':'Sáb','Sun':'Dom'}
+    MESES_ES={'Jan':'Ene','Feb':'Feb','Mar':'Mar','Apr':'Abr','May':'May','Jun':'Jun','Jul':'Jul','Aug':'Ago','Sep':'Sep','Oct':'Oct','Nov':'Nov','Dec':'Dic'}
+    partidos=[]; stats={}  # {div: {equipo: {pj,pg,pe,pp,gf,gc}}}
+    for item in raw.get('data',[]):
+        div = item.get('division','')
+        if div not in HOJAS_POS: continue
+        fecha_iso = item.get('fecha','')
+        gl = item.get('gl'); gv = item.get('gv')
+        try:
+            dt=datetime.strptime(fecha_iso,'%Y-%m-%d')
+            dia_en=dt.strftime('%a'); mes_en=dt.strftime('%b')
+            dia_fmt=f"{DIAS_ES.get(dia_en,dia_en)} {dt.day} {MESES_ES.get(mes_en,mes_en)}"
+        except Exception: dia_fmt=fecha_iso
+        p={'division':div,'fecha_iso':fecha_iso,'dia':dia_fmt,
+           'hora':item.get('hora','Sin definir'),'cancha':item.get('cancha','Sin definir'),
+           'local':item.get('local','').strip(),'visitante':item.get('visitante','').strip(),
+           'fase':item.get('fase','Liguilla Descenso'),'grupo':item.get('grupo',''),
+           'veedor':item.get('veedor','').strip()}
+        if gl is not None: p['gl']=int(gl); p['gv']=int(gv)
+        partidos.append(p)
+        # Calcular standings solo de partidos jugados (fecha pasada y con resultado)
+        try: fp=_d.fromisoformat(fecha_iso)
+        except Exception: continue
+        if gl is None or fp > hoy: continue
+        if div not in stats: stats[div]={}
+        gl,gv=int(gl),int(gv)
+        for eq,ef,ec in [(p['local'],gl,gv),(p['visitante'],gv,gl)]:
+            if eq not in stats[div]: stats[div][eq]={'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0}
+            s=stats[div][eq]; s['pj']+=1; s['gf']+=ef; s['gc']+=ec
+            if ef>ec: s['pg']+=1
+            elif ef==ec: s['pe']+=1
+            else: s['pp']+=1
+    # Construir tablas por grupo
+    result = {}
+    for div, grupos in GRUPOS_DESCENSO.items():
+        result[div] = {}
+        # Equipos en descenso = los que NO juegan 4tos (según ascenso_teams)
+        asc_set = set(ascenso_teams.get(div, [])) if ascenso_teams else set()
+        if asc_set:
+            todos_desc = [eq['equipo'] for eq in posiciones.get(div,[]) if eq['equipo'] not in asc_set]
+        else:
+            clf = DIV_CLASSIFY.get(div, 8)
+            todos_desc = [eq['equipo'] for eq in posiciones.get(div,[]) if eq['pos'] > clf]
+        g1 = grupos.get('Grupo 1', [])
+        g2 = [eq for eq in todos_desc if eq not in g1]
+        for gname, miembros in [('Grupo 1', g1), ('Grupo 2', g2)]:
+            tabla = []
+            for eq in miembros:
+                s = (stats.get(div,{})).get(eq, {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0})
+                pts = s['pg']*3 + s['pe']
+                tabla.append({'equipo':eq,'pj':s['pj'],'pg':s['pg'],'pe':s['pe'],'pp':s['pp'],
+                               'gf':s['gf'],'gc':s['gc'],'dg':s['gf']-s['gc'],'pts':pts})
+            # Ordenar: PTS, DG, GC (menos), GF (más)
+            tabla.sort(key=lambda x:(-x['pts'],-x['dg'],x['gc'],-x['gf']))
+            for i,r in enumerate(tabla): r['pos']=i+1
+            result[div][gname] = tabla
+    return partidos, result
+
 def leer_rivales_proximos(carpeta):
     """Lee Excel de próximos rivales (sin horario aún) como respaldo."""
     ruta=next((os.path.join(carpeta,f) for f in os.listdir(carpeta) if 'rivales' in f.lower() and f.endswith('.xlsx')),None)
@@ -232,7 +320,7 @@ def buscar_excels(carpeta):
         if 'rivales' in low: continue
         for div,pals in claves.items():
             if any(p in low for p in pals) and div not in stats: stats[div]=os.path.join(carpeta,arch); break
-    pos_ruta=next((os.path.join(carpeta,f) for f in archivos if any(k in f.lower() for k in ['torneo','posicion','fase']) and 'rivales' not in f.lower()),None)
+    pos_ruta=next((os.path.join(carpeta,f) for f in sorted(archivos,reverse=True) if any(k in f.lower() for k in ['torneo','posicion','fase']) and 'rivales' not in f.lower() and not f.startswith('~$')),None)
     sanc_ruta=next((os.path.join(carpeta,f) for f in archivos if 'sancionado' in f.lower()),None)
     logo_ruta=next((os.path.join(carpeta,f) for f in os.listdir(carpeta) if f.lower().endswith('.png')),None)
     return stats,pos_ruta,sanc_ruta,logo_ruta
@@ -260,6 +348,8 @@ def procesar_todo(carpeta):
 
     horarios,proxima_fecha=leer_horarios_json(carpeta)
     safe_print(f"\n[+] Horarios cargados: {len(horarios)} partidos | Proxima: {proxima_fecha}")
+    horarios_descenso=[]  # se inicializa; se calcula abajo tras normalización
+    descenso_grupos={}
     rivales_prox=leer_rivales_proximos(carpeta)
     safe_print(f"[+] Rivales proximos (respaldo): {sum(len(v) for v in rivales_prox.values())} equipos")
 
@@ -298,11 +388,15 @@ def procesar_todo(carpeta):
             nuevos_rivales[div][eq_nuevo] = nuevos_rivs
     rivales_prox = nuevos_rivales
 
-    # Enriquecer horarios con resultado si el partido ya fue jugado
-    # Solo aplica a partidos de fase regular (no 4tos, semis, finales)
-    FASES_SIN_RESULTADO = {'ida - 4tos','vuelta - 4tos','ida - semis','vuelta - semis','final'}
+    # Enriquecer horarios con resultado si el partido ya fue jugado (solo fechas pasadas)
+    from datetime import date as _date
+    hoy = _date.today()
     for p in horarios:
-        if (p.get('fase','').lower() in FASES_SIN_RESULTADO): continue
+        try:
+            fecha_p = _date.fromisoformat(p['fecha_iso'])
+        except Exception:
+            continue
+        if fecha_p >= hoy: continue  # partido futuro, sin resultado aún
         div = p['division']
         loc = simplificar_nombre(p['local'])
         vis = simplificar_nombre(p['visitante'])
@@ -326,6 +420,20 @@ def procesar_todo(carpeta):
         safe_print(f"\n[OK] {correcciones} nombres de equipos corregidos automaticamente.")
     else:
         safe_print("\n[OK] Todos los nombres de equipos coinciden con la tabla de posiciones.")
+
+    # Equipos que juegan 4tos de Final (Ascenso) — determinado por horarios.json
+    ascenso_teams = {}
+    for p in horarios:
+        if '4tos' in p.get('fase','').lower():
+            div = p['division']
+            if div not in ascenso_teams: ascenso_teams[div] = set()
+            ascenso_teams[div].add(p['local'])
+            ascenso_teams[div].add(p['visitante'])
+    ascenso_teams_list = {div: list(eq) for div, eq in ascenso_teams.items()}
+    safe_print(f"[+] Equipos en Ascenso (4tos): { {d:len(e) for d,e in ascenso_teams.items()} }")
+
+    horarios_descenso,descenso_grupos=leer_descenso_json(carpeta,posiciones,ascenso_teams)
+    safe_print(f"[+] Horarios descenso: {len(horarios_descenso)} partidos")
 
     logo_b64=''
     if logo_ruta:
@@ -391,7 +499,9 @@ def procesar_todo(carpeta):
     for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None)
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,'posiciones':posiciones,'resultados':res_partidos,
         'sancionados':sancionados,'globalTorneo':global_torneo,'logo':logo_b64,
-        'horarios':horarios,'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo,
+        'horarios':horarios,'horariosDescenso':horarios_descenso,'descensoGrupos':descenso_grupos,
+        'ascensoTeams':ascenso_teams_list,
+        'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo,
         'proximaFecha':proxima_fecha,'fechaSancionados':fecha_sanc}
 
 def generar_html(datos):
@@ -1161,15 +1271,26 @@ function buildTablaPos(divNombre){
   const clf=DQ[divNombre]||8, rsk=DR[divNombre]||3;
   if(!tabla.length) return`<div class="empty">Sin tabla disponible</div>`;
   const n=tabla.length;
-  const tienePor=tabla.some(eq=>eq.por!==undefined);
-  let rows='';
-  tabla.forEach(eq=>{
-    const pos=eq.pos;
-    const isTop=pos===1,isClf=pos>1&&pos<=clf,isBot=pos>n-rsk;
+  // Sin porcentaje en 3era División
+  const is3era=divNombre.startsWith('3era');
+  const tienePor=!is3era&&tabla.some(eq=>eq.por!==undefined);
+  const thead=`<thead><tr>
+      <th class="w30">#</th><th class="eq-h">Equipo</th>
+      <th class="w30" style="color:${color}">PTS</th>${tienePor?'<th class="w30">%</th>':''}<th class="w30">DG</th><th class="w30">PJ</th>
+      <th class="w30">G</th><th class="w30">E</th><th class="w30">P</th><th class="w30">GF</th><th class="w30">GC</th>
+    </tr></thead>`;
+  // Equipos en Ascenso = los que juegan 4tos de Final en horarios.json
+  const ascensoSet=new Set((DATA.ascensoTeams&&DATA.ascensoTeams[divNombre])||[]);
+  const ascenso=ascensoSet.size>0 ? tabla.filter(eq=>ascensoSet.has(eq.equipo)) : tabla.filter(eq=>eq.pos<=clf);
+  const descenso=ascensoSet.size>0 ? tabla.filter(eq=>!ascensoSet.has(eq.equipo)) : tabla.filter(eq=>eq.pos>clf);
+  const nAsc=ascenso.length;
+
+  const buildRow=(eq,posDisplay,isTop,isClf,isBot)=>{
     const rowCls=isTop?'zone-top':isClf?'zone-clf':isBot?'zone-bot':'';
+    const badge=isTop?`<span class="pos-badge pb-gold">${posDisplay}</span>`:isClf?`<span class="pos-badge pb-clf">${posDisplay}</span>`:isBot?`<span class="pos-badge pb-bot">${posDisplay}</span>`:`<span class="pos-badge pb-norm">${posDisplay}</span>`;
     const dgCls=eq.dg>0?'dg-pos':eq.dg<0?'dg-neg':'';
-    rows+=`<tr class="${rowCls}">
-      <td class="w30">${pb(pos,n,clf,rsk)}</td>
+    return`<tr class="${rowCls}">
+      <td class="w30">${badge}</td>
       <td class="eq-td">${eq.equipo}</td>
       <td class="w30 pts-td" style="color:${color}">${eq.pts}</td>
       ${tienePor?`<td class="w30">${(eq.por!==undefined?eq.por:0).toFixed(2)}</td>`:''}
@@ -1178,18 +1299,69 @@ function buildTablaPos(divNombre){
       <td class="w30">${eq.pg}</td><td class="w30">${eq.pe}</td><td class="w30">${eq.pp}</td>
       <td class="w30">${eq.gf}</td><td class="w30">${eq.gc}</td>
     </tr>`;
-  });
-  return`<div class="pos-wrap"><table class="pos-table">
-    <thead><tr>
-      <th class="w30">#</th><th class="eq-h">Equipo</th>
-      <th class="w30" style="color:${color}">PTS</th>${tienePor?'<th class="w30">%</th>':''}<th class="w30">DG</th><th class="w30">PJ</th>
-      <th class="w30">G</th><th class="w30">E</th><th class="w30">P</th><th class="w30">GF</th><th class="w30">GC</th>
-    </tr></thead><tbody>${rows}</tbody></table>
-    <div class="tbl-legend">
-      <span><span class="ldot" style="background:var(--green)"></span>Clasificación Fase 3 (top ${clf})</span>
-      <span><span class="ldot" style="background:var(--orange)"></span>Zona de riesgo (últimos ${rsk})</span>
-      <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DF  EFE  FAIR PLAY</span>
-    </div></div>`;
+  };
+  const rowsAsc=ascenso.map((eq,i)=>buildRow(eq,i+1,i===0,i>0&&i<nAsc-rsk,i>=nAsc-rsk)).join('');
+  const legend=`<div class="tbl-legend">
+      <span><span class="ldot" style="background:var(--gold,#c8a400)"></span>1er lugar</span>
+      <span><span class="ldot" style="background:var(--green)"></span>Clasificado (4tos de Final)</span>
+      <span style="color:var(--text3)">·</span>
+      <span>Empates de llaves se define en penales</span>
+      <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
+    </div>`;
+  let html=`<div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsAsc}</tbody></table>${legend}</div>`;
+
+  if(descenso.length){
+    const grupos=DATA.descensoGrupos&&DATA.descensoGrupos[divNombre];
+    if(grupos){
+      // Divisiones con liguilla de descenso — mostrar grupos
+      html+=`<div style="padding:16px 16px 0">
+        <div class="panel-head" style="border-radius:10px 10px 0 0;margin-bottom:12px">
+          <span class="material-symbols-outlined">arrow_downward</span>
+          <span class="panel-head-title">Liguilla de Descenso · ${divNombre}</span>
+        </div>
+      </div>`;
+      const theadDes=`<thead><tr>
+        <th class="w30">#</th><th class="eq-h">Equipo</th>
+        <th class="w30" style="color:var(--orange)">PTS</th><th class="w30">DG</th><th class="w30">PJ</th>
+        <th class="w30">G</th><th class="w30">E</th><th class="w30">P</th><th class="w30">GF</th><th class="w30">GC</th>
+      </tr></thead>`;
+      const descienden=divNombre==='1era División'?2:1;
+      const descLeyenda=divNombre==='1era División'?'Descienden 2 últimos de cada grupo':'Desciende (último de cada grupo)';
+      ['Grupo 1','Grupo 2'].forEach(gNombre=>{
+        const gtabla=grupos[gNombre]||[];
+        let grows='';
+        gtabla.forEach((eq,i)=>{
+          const isBot=i>=gtabla.length-descienden;
+          const dgCls=eq.dg>0?'dg-pos':eq.dg<0?'dg-neg':'';
+          const badge=i===0?`<span class="pos-badge pb-gold">${i+1}</span>`:isBot?`<span class="pos-badge pb-bot">${i+1}</span>`:`<span class="pos-badge pb-norm">${i+1}</span>`;
+          grows+=`<tr class="${isBot?'zone-bot':''}">
+            <td class="w30">${badge}</td>
+            <td class="eq-td">${eq.equipo}</td>
+            <td class="w30 pts-td" style="color:var(--orange)">${eq.pts}</td>
+            <td class="w30 ${dgCls}">${eq.dg>0?'+':''}${eq.dg}</td>
+            <td class="w30">${eq.pj}</td>
+            <td class="w30">${eq.pg}</td><td class="w30">${eq.pe}</td><td class="w30">${eq.pp}</td>
+            <td class="w30">${eq.gf}</td><td class="w30">${eq.gc}</td>
+          </tr>`;
+        });
+        html+=`<div style="padding:0 16px 16px">
+          <div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--orange);margin-bottom:6px;padding:5px 10px;background:rgba(230,140,0,.08);border-left:3px solid var(--orange);border-radius:0 6px 6px 0">${gNombre}</div>
+          <div class="pos-wrap" style="margin-bottom:0"><table class="pos-table">${theadDes}<tbody>${grows}</tbody></table></div>
+        </div>`;
+      });
+      html+=`<div style="padding:0 16px 16px"><div class="tbl-legend">
+        <span><span class="ldot" style="background:var(--orange)"></span>${descLeyenda}</span>
+        <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
+      </div></div>`;
+    } else {
+      // Divisiones sin liguilla (3era) — tabla simple
+      const rowsDes=descenso.map((eq,i)=>buildRow(eq,i+1,descenso.length,true)).join('');
+      html+=`<div style="padding:16px 16px 0"><div class="panel-head" style="border-radius:10px 10px 0 0;margin-bottom:0"><span class="material-symbols-outlined">arrow_downward</span><span class="panel-head-title">Tabla de Posiciones · ${divNombre} — Sin Liguilla</span></div></div>
+      <div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsDes}</tbody></table>
+      <div class="tbl-legend"><span>Equipos sin liguilla en esta fase</span></div></div>`;
+    }
+  }
+  return html;
 }
 
 function buildResultados(divNombre){
@@ -1270,7 +1442,7 @@ function buildDivPanel(divNombre){
 
   <div id="sub-${divNombre}-pos" class="sub-panel active">
     <div class="panel">
-      <div class="panel-head"><span class="material-symbols-outlined">format_list_numbered</span><span class="panel-head-title">Tabla de Posiciones · ${divNombre}</span></div>
+      <div class="panel-head"><span class="material-symbols-outlined">format_list_numbered</span><span class="panel-head-title">Tabla de Posiciones · ${divNombre} — Ascenso</span></div>
       <div class="panel-body" style="padding:0">${buildTablaPos(divNombre)}</div>
     </div>
   </div>
@@ -1380,7 +1552,7 @@ function renderTeam(divNombre,equipo){
     formaHTML+='</div>';
   }
 
-  // Partidos programados — muestra resultado si ya pasó la fecha/hora, sino el fixture
+  // Partidos programados — muestra resultado si ya pasó, sino el fixture (omite pasados sin resultado)
   const horEq=(DATA.horarios||[]).filter(p=>p.local===equipo||p.visitante===equipo);
   let pxHTML='<div class="empty">Sin partidos programados</div>';
   if(horEq.length){
@@ -1392,6 +1564,8 @@ function renderTeam(divNombre,equipo){
       const isPastEq=nowEq>matchDtEq;
       const hasResultEq=p.gl!==undefined&&p.gl!==null;
       const lTeam=p.local===equipo;
+      // Omitir partidos pasados sin resultado (ya jugados pero sin marcar aún)
+      if(isPastEq&&!hasResultEq) return;
       if(isPastEq&&hasResultEq){
         const gl=p.gl,gv=p.gv;
         const lw=gl>gv,vw=gv>gl;
@@ -1435,15 +1609,9 @@ function renderTeam(divNombre,equipo){
   }).slice(0,3);
 
   let rivalesHTML='';
-  if(rivPend.length===0&&proxHorarios.length===0){
+  if(proxHorarios.length===0){
     rivalesHTML='<div class="empty">Sin más rivales programados</div>';
   }
-  rivPend.forEach(r=>{
-    rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px">
-      <span style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;color:var(--text3);background:var(--surf);border:1px solid var(--border);padding:3px 8px;border-radius:4px;min-width:30px;text-align:center">${r.fecha_label}</span>
-      <span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:800;color:var(--gray);flex:1">vs ${r.rival}</span>
-    </div>`;
-  });
   proxHorarios.forEach(p=>{
     const esLocal=p.local===equipo;
     const rival=esLocal?p.visitante:p.local;
@@ -1608,12 +1776,9 @@ function abrirShare(equipo,divNombre){
     const hf=(p.hora==='Sin definir'?'00:00':p.hora.replace('h',':'));
     return nowSc<=new Date(p.fecha_iso+'T'+hf+':00');
   }).slice(0,3);
-  if(!rivPendientes.length&&!proxHorSc.length){
+  if(!proxHorSc.length){
     riv.innerHTML='<div style="font-size:10px;color:rgba(255,255,255,.35);padding:4px 0">Sin rivales pendientes</div>';
   }
-  rivPendientes.forEach(r=>{
-    riv.innerHTML+=`<div class="sc-match-row"><div class="sc-match-bar E"></div><span style="color:rgba(255,255,255,.35);font-size:9px;width:50px;flex-shrink:0;padding:7px 4px 7px 8px">${r.fecha_label}</span><span class="sc-match-rival" style="color:rgba(255,255,255,.75)">vs ${r.rival}</span></div>`;
-  });
   proxHorSc.forEach(p=>{
     const esLocalSc=p.local===equipo;
     const rivalSc=esLocalSc?p.visitante:p.local;
