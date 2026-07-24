@@ -223,71 +223,47 @@ def leer_horarios_json(carpeta):
     proxima = raw.get('proxima_fecha','')
     return partidos, proxima
 
-def leer_descenso_json(carpeta, posiciones, ascenso_teams=None):
-    """Lee horarios_descenso.json y calcula standings de la liguilla por grupo."""
+def calcular_descenso_grupos(horarios_list, posiciones, ascenso_teams=None):
+    """Calcula standings de la liguilla de descenso desde partidos con fase=='Descenso'."""
     from datetime import date as _d
     hoy = _d.today()
-    ruta = os.path.join(carpeta, 'horarios_descenso.json')
-    try:
-        with open(ruta, encoding='utf-8') as f: raw = json.load(f)
-    except Exception: raw = {'data':[]}
-    DIAS_ES={'Mon':'Lun','Tue':'Mar','Wed':'Mié','Thu':'Jue','Fri':'Vie','Sat':'Sáb','Sun':'Dom'}
-    MESES_ES={'Jan':'Ene','Feb':'Feb','Mar':'Mar','Apr':'Abr','May':'May','Jun':'Jun','Jul':'Jul','Aug':'Ago','Sep':'Sep','Oct':'Oct','Nov':'Nov','Dec':'Dic'}
-    partidos=[]; stats={}  # {div: {equipo: {pj,pg,pe,pp,gf,gc}}}
-    for item in raw.get('data',[]):
-        div = item.get('division','')
-        if div not in HOJAS_POS: continue
-        fecha_iso = item.get('fecha','')
-        gl = item.get('gl'); gv = item.get('gv')
-        try:
-            dt=datetime.strptime(fecha_iso,'%Y-%m-%d')
-            dia_en=dt.strftime('%a'); mes_en=dt.strftime('%b')
-            dia_fmt=f"{DIAS_ES.get(dia_en,dia_en)} {dt.day} {MESES_ES.get(mes_en,mes_en)}"
-        except Exception: dia_fmt=fecha_iso
-        p={'division':div,'fecha_iso':fecha_iso,'dia':dia_fmt,
-           'hora':item.get('hora','Sin definir'),'cancha':item.get('cancha','Sin definir'),
-           'local':item.get('local','').strip(),'visitante':item.get('visitante','').strip(),
-           'fase':item.get('fase','Liguilla Descenso'),'grupo':item.get('grupo',''),
-           'veedor':item.get('veedor','').strip()}
-        if gl is not None: p['gl']=int(gl); p['gv']=int(gv)
-        partidos.append(p)
-        # Calcular standings solo de partidos jugados (fecha pasada y con resultado)
-        try: fp=_d.fromisoformat(fecha_iso)
-        except Exception: continue
+    stats = {}
+    for p in horarios_list:
+        if p.get('fase','') != 'Descenso': continue
+        div = p['division']; gl = p.get('gl'); gv = p.get('gv')
+        try: fp = _d.fromisoformat(p['fecha_iso'])
+        except: continue
         if gl is None or fp > hoy: continue
-        if div not in stats: stats[div]={}
-        gl,gv=int(gl),int(gv)
-        for eq,ef,ec in [(p['local'],gl,gv),(p['visitante'],gv,gl)]:
-            if eq not in stats[div]: stats[div][eq]={'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0}
-            s=stats[div][eq]; s['pj']+=1; s['gf']+=ef; s['gc']+=ec
+        if div not in stats: stats[div] = {}
+        gl, gv = int(gl), int(gv)
+        for eq, ef, ec in [(p['local'], gl, gv), (p['visitante'], gv, gl)]:
+            if eq not in stats[div]: stats[div][eq] = {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0}
+            s = stats[div][eq]; s['pj']+=1; s['gf']+=ef; s['gc']+=ec
             if ef>ec: s['pg']+=1
             elif ef==ec: s['pe']+=1
             else: s['pp']+=1
-    # Construir tablas por grupo
     result = {}
     for div, grupos in GRUPOS_DESCENSO.items():
         result[div] = {}
-        # Equipos en descenso = los que NO juegan 4tos (según ascenso_teams)
         asc_set = set(ascenso_teams.get(div, [])) if ascenso_teams else set()
         if asc_set:
-            todos_desc = [eq['equipo'] for eq in posiciones.get(div,[]) if eq['equipo'] not in asc_set]
+            todos_desc = [eq['equipo'] for eq in posiciones.get(div, []) if eq['equipo'] not in asc_set]
         else:
             clf = DIV_CLASSIFY.get(div, 8)
-            todos_desc = [eq['equipo'] for eq in posiciones.get(div,[]) if eq['pos'] > clf]
+            todos_desc = [eq['equipo'] for eq in posiciones.get(div, []) if eq['pos'] > clf]
         g1 = grupos.get('Grupo 1', [])
         g2 = [eq for eq in todos_desc if eq not in g1]
         for gname, miembros in [('Grupo 1', g1), ('Grupo 2', g2)]:
             tabla = []
             for eq in miembros:
-                s = (stats.get(div,{})).get(eq, {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0})
+                s = (stats.get(div, {})).get(eq, {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0})
                 pts = s['pg']*3 + s['pe']
                 tabla.append({'equipo':eq,'pj':s['pj'],'pg':s['pg'],'pe':s['pe'],'pp':s['pp'],
                                'gf':s['gf'],'gc':s['gc'],'dg':s['gf']-s['gc'],'pts':pts})
-            # Ordenar: PTS, DG, GC (menos), GF (más)
-            tabla.sort(key=lambda x:(-x['pts'],-x['dg'],x['gc'],-x['gf']))
-            for i,r in enumerate(tabla): r['pos']=i+1
+            tabla.sort(key=lambda x: (-x['pts'], -x['dg'], x['gc'], -x['gf']))
+            for i, r in enumerate(tabla): r['pos'] = i+1
             result[div][gname] = tabla
-    return partidos, result
+    return result
 
 def leer_rivales_proximos(carpeta):
     """Lee Excel de próximos rivales (sin horario aún) como respaldo."""
@@ -348,8 +324,7 @@ def procesar_todo(carpeta):
 
     horarios,proxima_fecha=leer_horarios_json(carpeta)
     safe_print(f"\n[+] Horarios cargados: {len(horarios)} partidos | Proxima: {proxima_fecha}")
-    horarios_descenso=[]  # se inicializa; se calcula abajo tras normalización
-    descenso_grupos={}
+    descenso_grupos={}  # se calcula abajo tras normalización
     rivales_prox=leer_rivales_proximos(carpeta)
     safe_print(f"[+] Rivales proximos (respaldo): {sum(len(v) for v in rivales_prox.values())} equipos")
 
@@ -432,7 +407,8 @@ def procesar_todo(carpeta):
     ascenso_teams_list = {div: list(eq) for div, eq in ascenso_teams.items()}
     safe_print(f"[+] Equipos en Ascenso (4tos): { {d:len(e) for d,e in ascenso_teams.items()} }")
 
-    horarios_descenso,descenso_grupos=leer_descenso_json(carpeta,posiciones,ascenso_teams)
+    horarios_descenso=[p for p in horarios if p.get('fase','')=='Descenso']
+    descenso_grupos=calcular_descenso_grupos(horarios, posiciones, ascenso_teams)
     safe_print(f"[+] Horarios descenso: {len(horarios_descenso)} partidos")
 
     logo_b64=''
@@ -499,7 +475,7 @@ def procesar_todo(carpeta):
     for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None)
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,'posiciones':posiciones,'resultados':res_partidos,
         'sancionados':sancionados,'globalTorneo':global_torneo,'logo':logo_b64,
-        'horarios':horarios,'horariosDescenso':horarios_descenso,'descensoGrupos':descenso_grupos,
+        'horarios':horarios,'descensoGrupos':descenso_grupos,
         'ascensoTeams':ascenso_teams_list,
         'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo,
         'proximaFecha':proxima_fecha,'fechaSancionados':fecha_sanc}
@@ -1041,7 +1017,7 @@ function buildGlobal(){
       if(!byFase[fase][p.division]) byFase[fase][p.division]=[];
       byFase[fase][p.division].push(p);
     });
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso'};
     const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
     const now=new Date();
     pxHTML='';
@@ -1616,7 +1592,7 @@ function renderTeam(divNombre,equipo){
     const esLocal=p.local===equipo;
     const rival=esLocal?p.visitante:p.local;
     const faseLbl=p.fase||'Próximo';
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso'};
     const faseDisplay=FASE_LABEL[faseLbl]||faseLbl;
     rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px;border-left:3px solid ${color}">
       <div style="flex:1;min-width:0">
