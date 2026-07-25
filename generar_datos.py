@@ -363,15 +363,20 @@ def procesar_todo(carpeta):
             nuevos_rivales[div][eq_nuevo] = nuevos_rivs
     rivales_prox = nuevos_rivales
 
-    # Enriquecer horarios con resultado si el partido ya fue jugado (solo fechas pasadas)
+    # Enriquecer horarios con resultado desde el Excel — SOLO fase regular (no 4tos ni Descenso)
+    # Los resultados de 4tos y Descenso deben ingresarse directamente en horarios.json con gl/gv
+    FASES_CON_RESULTADO = {''}  # solo entradas sin fase especial (fase regular)
     from datetime import date as _date
     hoy = _date.today()
     for p in horarios:
+        fase_lower = p.get('fase','').lower()
+        if '4tos' in fase_lower or 'descenso' in fase_lower or 'semi' in fase_lower or 'final' in fase_lower:
+            continue  # resultado debe venir del JSON, no del Excel
         try:
             fecha_p = _date.fromisoformat(p['fecha_iso'])
         except Exception:
             continue
-        if fecha_p >= hoy: continue  # partido futuro, sin resultado aún
+        if fecha_p >= hoy: continue  # partido futuro
         div = p['division']
         loc = simplificar_nombre(p['local'])
         vis = simplificar_nombre(p['visitante'])
