@@ -72,14 +72,21 @@ EQUIPOS_RETIRADOS = {
 }
 
 # Grupos fijos para la liguilla de Descenso (equipos pre-asignados)
+ASCENSO_TEAMS_HARDCODED = {
+    '1era División':   ['Athlas','Sparta','Imbabura','Real Ibarra','Mandela','Racing','Somec','Boca Jr'],
+    '2da División':    ['Primavera','San Juan Calle','Sporting Jr','Canteranos','CDS','Rangers','Trovadores','América'],
+    '3era División 1': ['Juventus','Independiente Leal','Guaracha','Atl. Madrid','Marsella','Alianza Jr','La Victoria','Unión Sporting'],
+    '3era División 2': ['Libert','San José','Atl. San Miguel','Nueva Argentina','Standard','Germán Grijalva','JDA','Arapaima'],
+}
+
 GRUPOS_DESCENSO = {
     '1era División': {
         'Grupo 1': ['Pradera','Chacarita Jr','Cordovez','Fenix'],
-        # Grupo 2 = el resto de los equipos en descenso (pos > 8)
+        'Grupo 2': ['Avellaneda','Los Ceibos','Napoli','Vaster'],
     },
     '2da División': {
         'Grupo 1': ['Yuyucocha','Red Bull','Athlas Senior'],
-        # Grupo 2 = el resto
+        'Grupo 2': ['Estrella Juvenil','Inter de Milán','Real Pilanqui'],
     },
 }
 
@@ -245,15 +252,7 @@ def calcular_descenso_grupos(horarios_list, posiciones, ascenso_teams=None):
     result = {}
     for div, grupos in GRUPOS_DESCENSO.items():
         result[div] = {}
-        asc_set = set(ascenso_teams.get(div, [])) if ascenso_teams else set()
-        if asc_set:
-            todos_desc = [eq['equipo'] for eq in posiciones.get(div, []) if eq['equipo'] not in asc_set]
-        else:
-            clf = DIV_CLASSIFY.get(div, 8)
-            todos_desc = [eq['equipo'] for eq in posiciones.get(div, []) if eq['pos'] > clf]
-        g1 = grupos.get('Grupo 1', [])
-        g2 = [eq for eq in todos_desc if eq not in g1]
-        for gname, miembros in [('Grupo 1', g1), ('Grupo 2', g2)]:
+        for gname, miembros in grupos.items():
             tabla = []
             for eq in miembros:
                 s = (stats.get(div, {})).get(eq, {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0})
@@ -288,23 +287,227 @@ def leer_rivales_proximos(carpeta):
     return rivales
 
 def buscar_excels(carpeta):
-    archivos=[f for f in os.listdir(carpeta) if f.endswith('.xlsx')]
+    archivos=[f for f in os.listdir(carpeta) if f.endswith('.xlsx') and not f.startswith('~$')]
     stats={}
     claves={'1era División':['1era','primera'],'2da División':['2da','segunda'],'3era División 1':['division_1','3era_division_1','_1_v','g1','c1'],'3era División 2':['division_2','3era_division_2','_2_v','g2','c2']}
     for arch in archivos:
         low=arch.lower()
-        if 'rivales' in low: continue
+        if 'rivales' in low or 'final' in low: continue
         for div,pals in claves.items():
             if any(p in low for p in pals) and div not in stats: stats[div]=os.path.join(carpeta,arch); break
-    pos_ruta=next((os.path.join(carpeta,f) for f in sorted(archivos,reverse=True) if any(k in f.lower() for k in ['torneo','posicion','fase']) and 'rivales' not in f.lower() and not f.startswith('~$')),None)
+    pos_ruta=next((os.path.join(carpeta,f) for f in sorted(archivos,reverse=True) if any(k in f.lower() for k in ['torneo','posicion','fase']) and 'rivales' not in f.lower() and 'final' not in f.lower()),None)
+    # Elegir el archivo 'final' con más datos (primero no-backup, luego backup como respaldo)
+    def _tiene_datos_final(ruta):
+        try:
+            _wb = openpyxl.load_workbook(ruta, read_only=True, data_only=True)
+            for _sname in ['RESULTADOS ASCENSO', 'RESULTADOS 4TOS']:
+                if _sname in _wb.sheetnames:
+                    _ws = _wb[_sname]
+                    for _row in _ws.iter_rows(min_row=4, max_row=6, values_only=True):
+                        if _row[0] and _row[2]: return True
+            return False
+        except: return False
+    _finals = [os.path.join(carpeta,f) for f in sorted(archivos) if 'final' in f.lower() and 'backup' not in f.lower()]
+    _finals += [os.path.join(carpeta,f) for f in sorted(archivos) if 'final' in f.lower() and 'backup' in f.lower()]
+    final_ruta = next((r for r in _finals if _tiene_datos_final(r)), None) or (next(iter(_finals), None))
     sanc_ruta=next((os.path.join(carpeta,f) for f in archivos if 'sancionado' in f.lower()),None)
     logo_ruta=next((os.path.join(carpeta,f) for f in os.listdir(carpeta) if f.lower().endswith('.png')),None)
-    return stats,pos_ruta,sanc_ruta,logo_ruta
+    return stats,pos_ruta,final_ruta,sanc_ruta,logo_ruta
+
+DIV_FINAL_MAP = {
+    '1era': '1era División', '1era división': '1era División', '1era division': '1era División',
+    '2da': '2da División', '2da división': '2da División', '2da division': '2da División',
+    '3era div 1': '3era División 1', '3era división 1': '3era División 1', '3era division 1': '3era División 1',
+    '3era div 2': '3era División 2', '3era división 2': '3era División 2', '3era division 2': '3era División 2',
+}
+
+def _norm_div_final(raw):
+    if not raw: return ''
+    k = raw.strip().lower()
+    return DIV_FINAL_MAP.get(k, raw.strip())
+
+def leer_resultados_4tos(wb_final):
+    """Lee hoja RESULTADOS ASCENSO o RESULTADOS 4TOS: FASE | DIVISION | LOCAL | GL | GV | VISITANTE."""
+    sheet_name = next((s for s in ['RESULTADOS ASCENSO','RESULTADOS 4TOS'] if s in wb_final.sheetnames), None)
+    if not sheet_name: return []
+    ws = wb_final[sheet_name]
+    resultado = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row[0] or not row[2] or row[3] is None or row[4] is None or not row[5]: continue
+        fase_raw = str(row[0]).strip().upper()
+        if any(w in fase_raw for w in ['EQUIPO','LOCAL','FASE','#']): continue  # fila de instrucción
+        div = _norm_div_final(str(row[1]).strip() if row[1] else '')
+        local = str(row[2]).strip()
+        try: gl = int(row[3])
+        except: continue
+        try: gv = int(row[4])
+        except: continue
+        visitante = str(row[5]).strip()
+        if div not in HOJAS_POS: continue
+        fase = 'Ida - 4tos' if 'IDA' in fase_raw else 'Vuelta - 4tos' if 'VUELTA' in fase_raw else fase_raw
+        pen_l = int(row[6]) if len(row)>6 and row[6] is not None and str(row[6]).strip().isdigit() else None
+        pen_v = int(row[7]) if len(row)>7 and row[7] is not None and str(row[7]).strip().isdigit() else None
+        entry = {'fase': fase, 'division': div, 'local': local, 'gl': gl, 'gv': gv, 'visitante': visitante}
+        if pen_l is not None and pen_v is not None: entry['pen_l'] = pen_l; entry['pen_v'] = pen_v
+        resultado.append(entry)
+    return resultado
+
+def leer_resultados_descenso_excel(wb_final):
+    """Lee hoja RESULTADOS DESCENSO: FECHA | DIVISION | GRUPO | LOCAL | GL | GV | VISITANTE."""
+    if 'RESULTADOS DESCENSO' not in wb_final.sheetnames: return []
+    ws = wb_final['RESULTADOS DESCENSO']
+    resultado = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row[3] or row[4] is None or row[5] is None or not row[6]: continue
+        try: _ = int(row[4])
+        except: continue  # fila de instrucción
+        fecha = int(row[0]) if row[0] and str(row[0]).strip().isdigit() else 1
+        div = _norm_div_final(str(row[1]).strip() if row[1] else '')
+        grupo = str(row[2]).strip() if row[2] else ''
+        local = str(row[3]).strip()
+        if div not in HOJAS_POS: continue
+        try: gl = int(row[4]); gv = int(row[5])  # noqa
+        except: continue
+        visitante = str(row[6]).strip()
+        pen_l = int(row[7]) if len(row)>7 and row[7] is not None and str(row[7]).strip().isdigit() else None
+        pen_v = int(row[8]) if len(row)>8 and row[8] is not None and str(row[8]).strip().isdigit() else None
+        entry = {'fecha': fecha, 'division': div, 'grupo': grupo, 'local': local, 'gl': gl, 'gv': gv, 'visitante': visitante}
+        if pen_l is not None and pen_v is not None: entry['pen_l'] = pen_l; entry['pen_v'] = pen_v
+        resultado.append(entry)
+    return resultado
+
+def calcular_descenso_desde_excel(res_descenso, posiciones, ascenso_teams=None):
+    """Calcula standings de descenso desde RESULTADOS DESCENSO del Excel."""
+    stats = {}
+    for p in res_descenso:
+        div = p['division']
+        if div not in stats: stats[div] = {}
+        gl, gv = int(p['gl']), int(p['gv'])
+        for eq, ef, ec in [(p['local'], gl, gv), (p['visitante'], gv, gl)]:
+            if eq not in stats[div]: stats[div][eq] = {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0}
+            s = stats[div][eq]; s['pj']+=1; s['gf']+=ef; s['gc']+=ec
+            if ef>ec: s['pg']+=1
+            elif ef==ec: s['pe']+=1
+            else: s['pp']+=1
+    result = {}
+    for div, grupos in GRUPOS_DESCENSO.items():
+        result[div] = {}
+        for gname, miembros in grupos.items():
+            tabla = []
+            for eq in miembros:
+                s = stats.get(div, {}).get(eq, {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0})
+                pts = s['pg']*3 + s['pe']
+                tabla.append({'equipo':eq,'pj':s['pj'],'pg':s['pg'],'pe':s['pe'],'pp':s['pp'],
+                               'gf':s['gf'],'gc':s['gc'],'dg':s['gf']-s['gc'],'pts':pts})
+            tabla.sort(key=lambda x: (-x['pts'], -x['dg'], x['gc'], -x['gf']))
+            for i, r in enumerate(tabla): r['pos'] = i+1
+            result[div][gname] = tabla
+    return result
+
+def agrupar_res_4tos(res_4tos):
+    """Organiza resultados 4tos por división → lista de {fase, partidos}."""
+    by_div = {}
+    for p in res_4tos:
+        div = p['division']
+        if div not in by_div: by_div[div] = {}
+        f = p['fase']
+        if f not in by_div[div]: by_div[div][f] = []
+        entry={'local':p['local'],'gl':p['gl'],'gv':p['gv'],'visitante':p['visitante']}
+        if 'pen_l' in p and 'pen_v' in p: entry['pen_l']=p['pen_l']; entry['pen_v']=p['pen_v']
+        by_div[div][f].append(entry)
+    result = {}
+    FASE_ORDER = ['Ida - 4tos', 'Vuelta - 4tos']
+    for div, fases in by_div.items():
+        result[div] = [{'fase': f, 'partidos': fases[f]} for f in FASE_ORDER if f in fases]
+        for f in fases:
+            if f not in FASE_ORDER:
+                result[div].append({'fase': f, 'partidos': fases[f]})
+    return result
+
+def agrupar_res_descenso_excel(res_descenso):
+    """Organiza resultados descenso por división → lista de {fecha, grupo, partidos}."""
+    by_div = {}
+    for p in res_descenso:
+        div = p['division']
+        if div not in by_div: by_div[div] = {}
+        key = (p['fecha'], p['grupo'])
+        if key not in by_div[div]: by_div[div][key] = []
+        entry={'local':p['local'],'gl':p['gl'],'gv':p['gv'],'visitante':p['visitante']}
+        if 'pen_l' in p and 'pen_v' in p: entry['pen_l']=p['pen_l']; entry['pen_v']=p['pen_v']
+        by_div[div][key].append(entry)
+    result = {}
+    for div, fds in by_div.items():
+        result[div] = [{'fecha': k[0], 'grupo': k[1], 'partidos': v} for k, v in sorted(fds.items())]
+    return result
+
+def calcular_ascenso_standings(res_4tos, ascenso_teams):
+    """Calcula standings de 4tos de Final. Clasificados = equipos que ganaron su llave (agregado+penales)."""
+    stats = {}
+    # Acumular goles de llave por par de equipos
+    llaves = {}  # div -> frozenset({eq1,eq2}) -> {eq: {agg_gf, pen_wins}}
+    for p in res_4tos:
+        div = p['division']
+        if div not in stats: stats[div] = {}
+        if div not in llaves: llaves[div] = {}
+        gl, gv = int(p['gl']), int(p['gv'])
+        has_pen = 'pen_l' in p and 'pen_v' in p
+        # Estadísticas de tabla (puntos según tiempo regular)
+        for eq, ef, ec in [(p['local'], gl, gv), (p['visitante'], gv, gl)]:
+            if eq not in stats[div]: stats[div][eq] = {'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0}
+            s = stats[div][eq]; s['pj']+=1; s['gf']+=ef; s['gc']+=ec
+            if ef > ec: s['pg']+=1
+            elif ef == ec: s['pe']+=1
+            else: s['pp']+=1
+        # Acumular goles de llave (agregado)
+        pk = frozenset([p['local'], p['visitante']])
+        if pk not in llaves[div]:
+            llaves[div][pk] = {p['local']:{'agg':0,'pen':0}, p['visitante']:{'agg':0,'pen':0}}
+        llaves[div][pk][p['local']]['agg'] += gl
+        llaves[div][pk][p['visitante']]['agg'] += gv
+        if has_pen:
+            pen_l, pen_v = int(p['pen_l']), int(p['pen_v'])
+            if pen_l > pen_v: llaves[div][pk][p['local']]['pen'] += 1
+            else: llaves[div][pk][p['visitante']]['pen'] += 1
+    # Determinar clasificados por llave
+    clasificados = {div: set() for div in llaves}
+    for div, pares in llaves.items():
+        for pk, equipos in pares.items():
+            teams = list(pk)
+            t1, t2 = teams[0], teams[1]
+            a1, a2 = equipos[t1]['agg'], equipos[t2]['agg']
+            if a1 > a2: clasificados[div].add(t1)
+            elif a2 > a1: clasificados[div].add(t2)
+            else:  # empate en agregado → quien ganó penales
+                if equipos[t1]['pen'] > equipos[t2]['pen']: clasificados[div].add(t1)
+                else: clasificados[div].add(t2)
+    result = {}
+    for div in set(list(stats.keys()) + list(ascenso_teams.keys())):
+        asc_set = set(ascenso_teams.get(div, []))
+        clf_set = clasificados.get(div, set())
+        tabla = []
+        equipos_vistos = set()
+        for eq, s in stats.get(div, {}).items():
+            if eq not in asc_set: continue
+            pts = s['pg']*3 + s['pe']
+            tabla.append({'equipo':eq,'pts':pts,'pj':s['pj'],'pg':s['pg'],'pe':s['pe'],'pp':s['pp'],
+                          'gf':s['gf'],'gc':s['gc'],'dg':s['gf']-s['gc'],'clasificado': eq in clf_set})
+            equipos_vistos.add(eq)
+        for eq in asc_set:
+            if eq not in equipos_vistos:
+                tabla.append({'equipo':eq,'pts':0,'pj':0,'pg':0,'pe':0,'pp':0,'gf':0,'gc':0,'dg':0,'clasificado': eq in clf_set})
+        # Clasificados primero (ordenados por PTS→DG→GC→GF), luego el resto
+        clf_list = sorted([r for r in tabla if r['clasificado']], key=lambda x: (-x['pts'],-x['dg'],x['gc'],-x['gf']))
+        no_clf  = sorted([r for r in tabla if not r['clasificado']], key=lambda x: (-x['pts'],-x['dg'],x['gc'],-x['gf']))
+        tabla = clf_list + no_clf
+        for i, r in enumerate(tabla): r['pos'] = i+1
+        result[div] = tabla
+    return result
 
 def procesar_todo(carpeta):
-    stats_rutas,pos_ruta,sanc_ruta,logo_ruta=buscar_excels(carpeta)
+    stats_rutas,pos_ruta,final_ruta,sanc_ruta,logo_ruta=buscar_excels(carpeta)
     safe_print("[+] Archivos:"); [safe_print(f"   {d}: {os.path.basename(r)}") for d,r in stats_rutas.items()]
     if pos_ruta: safe_print(f"   Posiciones: {os.path.basename(pos_ruta)}")
+    if final_ruta: safe_print(f"   Fase Final: {os.path.basename(final_ruta)}")
     if sanc_ruta: safe_print(f"   Sancionados: {os.path.basename(sanc_ruta)}")
     if logo_ruta: safe_print(f"   Logo: {os.path.basename(logo_ruta)}")
 
@@ -315,9 +518,22 @@ def procesar_todo(carpeta):
         safe_print(f"   {len(res_stats[nombre]['teamsData'])} equipos | F{res_stats[nombre]['meta']['ultima_fecha']} | {total_amon} amonestados")
 
     posiciones={}; res_partidos={}
+    res_4tos=[]; res_descenso_excel=[]
     if pos_ruta:
         wb_pos=openpyxl.load_workbook(pos_ruta,read_only=True,data_only=True)
         posiciones=leer_posiciones(wb_pos); res_partidos=leer_resultados(wb_pos)
+        # Leer 4tos y descenso del archivo torneo si tiene las hojas
+        res_4tos=leer_resultados_4tos(wb_pos)
+        res_descenso_excel=leer_resultados_descenso_excel(wb_pos)
+        safe_print(f"[+] RESULTADOS 4TOS: {len(res_4tos)} partidos | RESULTADOS DESCENSO: {len(res_descenso_excel)} partidos")
+    # Fallback: leer desde archivo fase final si existe y el torneo no tiene datos
+    if final_ruta and not res_4tos and not res_descenso_excel:
+        wb_final=openpyxl.load_workbook(final_ruta,read_only=True,data_only=True)
+        res_4tos=leer_resultados_4tos(wb_final)
+        res_descenso_excel=leer_resultados_descenso_excel(wb_final)
+        if res_4tos or res_descenso_excel:
+            safe_print(f"[+] (fallback fase final) 4TOS: {len(res_4tos)} | DESCENSO: {len(res_descenso_excel)}")
+
 
     sancionados={}; fecha_sanc=''
     if sanc_ruta: sancionados,fecha_sanc=leer_sancionados(sanc_ruta)
@@ -401,19 +617,77 @@ def procesar_todo(carpeta):
     else:
         safe_print("\n[OK] Todos los nombres de equipos coinciden con la tabla de posiciones.")
 
-    # Equipos que juegan 4tos de Final (Ascenso) — determinado por horarios.json
-    ascenso_teams = {}
-    for p in horarios:
-        if '4tos' in p.get('fase','').lower():
-            div = p['division']
-            if div not in ascenso_teams: ascenso_teams[div] = set()
-            ascenso_teams[div].add(p['local'])
-            ascenso_teams[div].add(p['visitante'])
+    # Equipos en Ascenso: usar lista hardcodeada (fija por reglamento)
+    ascenso_teams = {div: set(teams) for div, teams in ASCENSO_TEAMS_HARDCODED.items()}
     ascenso_teams_list = {div: list(eq) for div, eq in ascenso_teams.items()}
     safe_print(f"[+] Equipos en Ascenso (4tos): { {d:len(e) for d,e in ascenso_teams.items()} }")
 
+    # Inyectar resultados 4tos desde Excel → horarios.json (para que Global muestre FIN)
+    if res_4tos:
+        for r in res_4tos:
+            rl = simplificar_nombre(r['local']); rv = simplificar_nombre(r['visitante'])
+            div_r = r['division']; fase_r = r['fase']
+            for p in horarios:
+                if p.get('division') != div_r: continue
+                if r['fase'] not in p.get('fase','') and p.get('fase','') not in r['fase']: continue
+                pl = simplificar_nombre(p['local']); pv = simplificar_nombre(p['visitante'])
+                if rl == pl and rv == pv:
+                    p['gl'] = r['gl']; p['gv'] = r['gv']; break
+                elif rl == pv and rv == pl:
+                    p['gl'] = r['gv']; p['gv'] = r['gl']; break
+        safe_print(f"[+] Resultados 4tos inyectados en horarios: {len(res_4tos)}")
+
+    # Inyectar resultados descenso del Excel en horarios (para que aparezcan inline en Global)
+    if res_descenso_excel:
+        # Divisiones con resultados en Excel
+        divs_con_excel = set(r['division'] for r in res_descenso_excel)
+        # Intentar inyectar en horarios existentes por nombre exacto
+        injected_desc = set()
+        for p in horarios:
+            if p.get('fase','') != 'Descenso' or p.get('division','') not in divs_con_excel: continue
+            pl = simplificar_nombre(p['local']); pv = simplificar_nombre(p['visitante'])
+            for r in res_descenso_excel:
+                if r['division'] != p.get('division',''): continue
+                rl = simplificar_nombre(r['local']); rv = simplificar_nombre(r['visitante'])
+                if rl == pl and rv == pv:
+                    p['gl'] = r['gl']; p['gv'] = r['gv']
+                    if 'pen_l' in r: p['pen_l'] = r['pen_l']; p['pen_v'] = r['pen_v']
+                    injected_desc.add((r['division'], r['local'], r['visitante']))
+                    break
+        # Para los que no coincidieron: buscar horario mismo grupo para tomar fecha/hora/cancha/veedor
+        horarios_desc_por_div = {}
+        for p in horarios:
+            if p.get('fase','') != 'Descenso': continue
+            d = p.get('division','')
+            if d not in horarios_desc_por_div: horarios_desc_por_div[d] = []
+            horarios_desc_por_div[d].append(p)
+        for r in res_descenso_excel:
+            key = (r['division'], r['local'], r['visitante'])
+            if key in injected_desc: continue
+            # Tomar fecha/hora/cancha/veedor del primer horario de esa división como referencia
+            ref = next(iter(horarios_desc_por_div.get(r['division'], [])), None)
+            synth = {'fase':'Descenso','division':r['division'],'local':r['local'],'visitante':r['visitante'],
+                     'gl':r['gl'],'gv':r['gv'],
+                     'hora': ref['hora'] if ref else 'Sin definir',
+                     'dia':  ref['dia']  if ref else '',
+                     'cancha': ref['cancha'] if ref else 'Sin definir',
+                     'fecha_iso': ref['fecha_iso'] if ref else '2025-07-01'}
+            if ref and ref.get('veedor'): synth['veedor'] = ref['veedor']
+            if 'pen_l' in r: synth['pen_l']=r['pen_l']; synth['pen_v']=r['pen_v']
+            horarios.append(synth)
+        # Eliminar horarios descenso originales de divisiones cubiertas por Excel que quedaron sin resultado
+        horarios[:] = [p for p in horarios if not (p.get('fase','')=='Descenso' and p.get('division','') in divs_con_excel and p.get('gl') is None)]
+        safe_print(f"[+] Resultados descenso en horarios: {len(res_descenso_excel)} total")
+
+    # Descenso: preferir Excel si tiene datos, sino horarios.json
+    if res_descenso_excel:
+        descenso_grupos = calcular_descenso_desde_excel(res_descenso_excel, posiciones, ascenso_teams)
+        safe_print(f"[+] Descenso grupos desde Excel RESULTADOS DESCENSO")
+    else:
+        descenso_grupos = calcular_descenso_grupos(horarios, posiciones, ascenso_teams)
+        safe_print(f"[+] Descenso grupos desde horarios.json")
+
     horarios_descenso=[p for p in horarios if p.get('fase','')=='Descenso']
-    descenso_grupos=calcular_descenso_grupos(horarios, posiciones, ascenso_teams)
     safe_print(f"[+] Horarios descenso: {len(horarios_descenso)} partidos")
 
     logo_b64=''
@@ -478,10 +752,15 @@ def procesar_todo(carpeta):
         'prom_goles_partido':prom,'total_partidos':total_part_t,'ranking_equipos_amonestados':ranking_eq_amon[:15],
         'total_equipos':sum(d['num_equipos'] for d in stats_div),'total_tarjetas':sum(d['total_tarjetas'] for d in stats_div),'total_goles':sum(d['total_goles'] for d in stats_div),'total_jugadores':total_jugadores}
     for d in res_stats.values(): d.pop('_goles_raw',None); d.pop('_tarjetas_raw',None)
+    res4tos_agrupados = agrupar_res_4tos(res_4tos) if res_4tos else {}
+    resDescenso_agrupados = agrupar_res_descenso_excel(res_descenso_excel) if res_descenso_excel else {}
+    # Siempre calcular standings (con 0 pts si no hay resultados aún)
+    ascenso_standings = calcular_ascenso_standings(res_4tos, {div: list(eq) for div, eq in ascenso_teams.items()})
     return {'generado':datetime.now().strftime('%d/%m/%Y %H:%M'),'divisiones':res_stats,'posiciones':posiciones,'resultados':res_partidos,
         'sancionados':sancionados,'globalTorneo':global_torneo,'logo':logo_b64,
         'horarios':horarios,'descensoGrupos':descenso_grupos,
-        'ascensoTeams':ascenso_teams_list,
+        'ascensoTeams':ascenso_teams_list,'ascensoStandings':ascenso_standings,
+        'res4tos':res4tos_agrupados,'resDescenso':resDescenso_agrupados,
         'rivalesProximos':rivales_prox,'ultimos_por_equipo':ultimos_por_equipo,
         'proximaFecha':proxima_fecha,'fechaSancionados':fecha_sanc}
 
@@ -1040,14 +1319,17 @@ function buildGlobal(){
           const matchDt=new Date(p.fecha_iso+'T'+horaFmt+':00');
           const isPast=now>matchDt;
           const hasResult=p.gl!==undefined&&p.gl!==null;
-          if(isPast&&hasResult){
+          if(hasResult){
             const gl=p.gl,gv=p.gv;
-            const lw=gl>gv,vw=gv>gl;
-            pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color}">`;
+            const hasPen=p.pen_l!==undefined&&p.pen_v!==undefined;
+            const lw=hasPen?(p.pen_l>p.pen_v):(gl>gv),vw=hasPen?(p.pen_v>p.pen_l):(gv>gl);
+            const penLabel=hasPen?`<span style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;background:linear-gradient(135deg,#1a1f2e,#252b3d);color:#facc15;border:1px solid rgba(250,204,21,.3);border-radius:3px;padding:1px 7px;margin-top:2px;display:inline-block">PEN ${p.pen_l}–${p.pen_v}</span>`:'';
+            pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color};flex-wrap:wrap">`;
             pxHTML+=`<div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>`;
             pxHTML+=`<div class="fixture-teams"><div class="fixture-team" style="${lw?'font-weight:900;color:'+color:''}">${p.local}</div><div class="fixture-vs" style="font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:4px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px">${gl} – ${gv}</div><div class="fixture-team" style="${vw?'font-weight:900;color:'+color:''}">${p.visitante}</div></div>`;
-            pxHTML+=`<div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+            if(!canchaTbd) pxHTML+=`<div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
             if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
+            if(hasPen) pxHTML+=`<div style="width:100%;display:flex;justify-content:center;padding:4px 0 2px">${penLabel}</div>`;
             pxHTML+=`</div>`;
           } else {
             pxHTML+=`<div class="fixture-card" style="--accent:${color}">`;
@@ -1250,7 +1532,9 @@ function buildTablaPos(divNombre){
   const tabla=DATA.posiciones[divNombre]||[];
   const color=DC[divNombre]||'#c8102e';
   const clf=DQ[divNombre]||8, rsk=DR[divNombre]||3;
-  if(!tabla.length) return`<div class="empty">Sin tabla disponible</div>`;
+  const asc4tos=(DATA.ascensoStandings&&DATA.ascensoStandings[divNombre])||[];
+  // Si no hay tabla regular ni standings de 4tos, no hay nada que mostrar
+  if(!tabla.length && !asc4tos.length) return`<div class="empty">Sin tabla disponible</div>`;
   const n=tabla.length;
   // Sin porcentaje en 3era División
   const is3era=divNombre.startsWith('3era');
@@ -1260,10 +1544,15 @@ function buildTablaPos(divNombre){
       <th class="w30" style="color:${color}">PTS</th>${tienePor?'<th class="w30">%</th>':''}<th class="w30">DG</th><th class="w30">PJ</th>
       <th class="w30">G</th><th class="w30">E</th><th class="w30">P</th><th class="w30">GF</th><th class="w30">GC</th>
     </tr></thead>`;
-  // Equipos en Ascenso = los que juegan 4tos de Final en horarios.json
+  // Equipos en Ascenso — usar standings de 4tos si existen (ya ordenados por PTS→DG→GC)
   const ascensoSet=new Set((DATA.ascensoTeams&&DATA.ascensoTeams[divNombre])||[]);
-  const ascenso=ascensoSet.size>0 ? tabla.filter(eq=>ascensoSet.has(eq.equipo)) : tabla.filter(eq=>eq.pos<=clf);
-  const descenso=ascensoSet.size>0 ? tabla.filter(eq=>!ascensoSet.has(eq.equipo)) : tabla.filter(eq=>eq.pos>clf);
+  // Ascenso: preferir standings de 4tos (ya tienen PTS/DG/GC calculados y ordenados)
+  const ascenso = asc4tos.length ? asc4tos
+    : ascensoSet.size>0 ? tabla.filter(eq=>ascensoSet.has(eq.equipo))
+    : tabla.filter(eq=>eq.pos<=clf);
+  const descenso=ascensoSet.size>0
+    ? tabla.filter(eq=>!ascensoSet.has(eq.equipo))
+    : tabla.filter(eq=>eq.pos>clf);
   const nAsc=ascenso.length;
 
   const buildRow=(eq,posDisplay,isTop,isClf,isBot)=>{
@@ -1281,19 +1570,27 @@ function buildTablaPos(divNombre){
       <td class="w30">${eq.gf}</td><td class="w30">${eq.gc}</td>
     </tr>`;
   };
-  const rowsAsc=ascenso.map((eq,i)=>buildRow(eq,i+1,i===0,i>0&&i<nAsc-rsk,i>=nAsc-rsk)).join('');
-  const legend=`<div class="tbl-legend">
-      <span><span class="ldot" style="background:var(--gold,#c8a400)"></span>1er lugar</span>
-      <span><span class="ldot" style="background:var(--green)"></span>Clasificado (4tos de Final)</span>
-      <span style="color:var(--text3)">·</span>
-      <span>Empates de llaves se define en penales</span>
-      <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
-    </div>`;
+  const usando4tos = asc4tos.length > 0;
+  const rowsAsc = usando4tos
+    ? ascenso.filter(eq=>eq.clasificado).map((eq,i)=>buildRow(eq,i+1,true,false,false)).join('')
+    : ascenso.map((eq,i)=>buildRow(eq,i+1,i===0,i>0&&i<nAsc-rsk,i>=nAsc-rsk)).join('');
+  const legend = usando4tos
+    ? `<div class="tbl-legend">
+        <span><span class="ldot" style="background:var(--gold,#c8a400)"></span>4 clasificados a semifinales &nbsp;·&nbsp; Cruces: 1° vs 4° / 2° vs 3°</span>
+      </div>`
+    : `<div class="tbl-legend">
+        <span><span class="ldot" style="background:var(--gold,#c8a400)"></span>1er lugar</span>
+        <span><span class="ldot" style="background:var(--green)"></span>Clasificado (4tos de Final)</span>
+        <span style="color:var(--text3)">·</span>
+        <span>Empates de llaves se define en penales</span>
+        <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
+      </div>`;
   let html=`<div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsAsc}</tbody></table>${legend}</div>`;
 
-  if(descenso.length){
-    const grupos=DATA.descensoGrupos&&DATA.descensoGrupos[divNombre];
-    if(grupos){
+  // Siempre mostrar descenso si hay grupos definidos (no depende de posiciones)
+  const grupos=DATA.descensoGrupos&&DATA.descensoGrupos[divNombre];
+  if(grupos){
+    {
       // Divisiones con liguilla de descenso — mostrar grupos
       html+=`<div style="padding:16px 16px 0">
         <div class="panel-head" style="border-radius:10px 10px 0 0;margin-bottom:12px">
@@ -1334,32 +1631,99 @@ function buildTablaPos(divNombre){
         <span><span class="ldot" style="background:var(--orange)"></span>${descLeyenda}</span>
         <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
       </div></div>`;
-    } else {
-      // Divisiones sin liguilla (3era) — tabla simple
-      const rowsDes=descenso.map((eq,i)=>buildRow(eq,i+1,descenso.length,true)).join('');
-      html+=`<div style="padding:16px 16px 0"><div class="panel-head" style="border-radius:10px 10px 0 0;margin-bottom:0"><span class="material-symbols-outlined">arrow_downward</span><span class="panel-head-title">Tabla de Posiciones · ${divNombre} — Sin Liguilla</span></div></div>
-      <div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsDes}</tbody></table>
-      <div class="tbl-legend"><span>Equipos sin liguilla en esta fase</span></div></div>`;
     }
   }
+
+  // 3era División: equipos que NO juegan ascenso ni liguilla → "sin liguilla"
+  if(divNombre.startsWith('3era') && !grupos){
+    const ascSet=new Set(asc4tos.map(e=>e.equipo));
+    const divData=DATA.divisiones[divNombre];
+    if(divData){
+      const restTeams=Object.keys(divData.teamsData).filter(t=>!ascSet.has(t)).sort();
+      if(restTeams.length){
+        const theadRest=`<thead><tr>
+          <th class="w30">#</th><th class="eq-h">Equipo</th>
+          <th class="w30" style="color:var(--text3)">PTS</th><th class="w30">DG</th><th class="w30">PJ</th>
+          <th class="w30">G</th><th class="w30">E</th><th class="w30">P</th><th class="w30">GF</th><th class="w30">GC</th>
+        </tr></thead>`;
+        const rowsRest=restTeams.map((t,i)=>`<tr>
+          <td class="w30"><span class="pos-badge pb-norm">${i+1}</span></td>
+          <td class="eq-td">${t}</td>
+          <td class="w30 pts-td" style="color:var(--text3)">0</td>
+          <td class="w30">0</td><td class="w30">0</td><td class="w30">0</td>
+          <td class="w30">0</td><td class="w30">0</td><td class="w30">0</td><td class="w30">0</td>
+        </tr>`).join('');
+        html+=`<div style="padding:16px 16px 0">
+          <div class="panel-head" style="border-radius:10px 10px 0 0;margin-bottom:0;background:linear-gradient(to right,var(--surf3),var(--surf2))">
+            <span class="material-symbols-outlined" style="color:var(--text3)">format_list_numbered</span>
+            <span class="panel-head-title" style="color:var(--text3)">Sin Liguilla · ${divNombre}</span>
+          </div>
+        </div>
+        <div style="padding:0 16px 16px">
+          <div class="pos-wrap"><table class="pos-table">${theadRest}<tbody>${rowsRest}</tbody></table></div>
+          <div class="tbl-legend"><span>Equipos sin liguilla en esta fase — temporada finalizada</span></div>
+        </div>`;
+      }
+    }
+  }
+
   return html;
 }
 
 function buildResultados(divNombre){
-  const fechas=DATA.resultados[divNombre]||[];
-  let html=fechas.length?'':'<div class="empty">Sin resultados registrados</div>';
-  fechas.forEach(f=>{
-    html+=`<div class="fecha-block"><div class="fecha-lbl">Fecha ${f.fecha}</div>`;
-    f.partidos.forEach(p=>{
-      const draw=p.gl===p.gv,lW=p.gl>p.gv,vW=p.gv>p.gl;
-      html+=`<div class="match-card">
+  const color=DC[divNombre]||'#c8102e';
+  const is3era=divNombre.startsWith('3era');
+
+  function matchCards(partidos){
+    let h='';
+    partidos.forEach(p=>{
+      const hasPen=p.pen_l!==undefined&&p.pen_v!==undefined;
+      const lWpen=hasPen&&p.pen_l>p.pen_v, vWpen=hasPen&&p.pen_v>p.pen_l;
+      const draw=p.gl===p.gv,lW=hasPen?lWpen:(p.gl>p.gv),vW=hasPen?vWpen:(p.gv>p.gl);
+      const penTag=hasPen?`<div style="width:100%;text-align:center;margin-top:5px"><span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;background:linear-gradient(135deg,#1a1f2e,#252b3d);color:#facc15;border:1px solid rgba(250,204,21,.3);border-radius:4px;padding:2px 10px">PENALES ${p.pen_l} — ${p.pen_v}</span></div>`:'';
+      h+=`<div class="match-card" style="flex-wrap:wrap">
         <div class="match-team ${lW?'winner':''}" style="opacity:${vW?.6:1}">${p.local}</div>
-        <div class="match-score ${draw?'draw':''}">${p.gl} — ${p.gv}</div>
+        <div class="match-score ${draw&&!hasPen?'draw':''}" style="${lW||vW?'border-color:'+color+';color:'+color:''}">${p.gl} — ${p.gv}</div>
         <div class="match-team right ${vW?'winner':''}" style="opacity:${lW?.6:1}">${p.visitante}</div>
+        ${penTag}
       </div>`;
     });
-    html+='</div>';
-  });
+    return h;
+  }
+
+  function sectionHeader(label, icon){
+    return`<div style="display:flex;align-items:center;gap:8px;padding:9px 14px;background:linear-gradient(135deg,rgba(200,16,46,.12),rgba(200,16,46,.04));border-left:3px solid var(--red);border-radius:0 8px 8px 0;margin:18px 0 12px"><span class="material-symbols-outlined" style="font-size:17px;color:var(--red)">${icon}</span><span style="font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:var(--red)">${label}</span></div>`;
+  }
+
+  let html='';
+  let hasAny=false;
+
+  // ── Sección 4tos de Final ──────────────────────────────────
+  const res4 = (DATA.res4tos&&DATA.res4tos[divNombre])||[];
+  if(res4.length){
+    hasAny=true;
+    html+=sectionHeader('4tos de Final','emoji_events');
+    const FASE_LBL={'Ida - 4tos':'IDA','Vuelta - 4tos':'VUELTA'};
+    res4.forEach(f=>{
+      const label=FASE_LBL[f.fase]||f.fase;
+      html+=`<div class="fecha-block"><div class="fecha-lbl">${label}</div>${matchCards(f.partidos)}</div>`;
+    });
+  }
+
+  // ── Sección Liguilla Descenso ──────────────────────────────
+  if(!is3era){
+    const resDesc=(DATA.resDescenso&&DATA.resDescenso[divNombre])||[];
+    if(resDesc.length){
+      hasAny=true;
+      html+=sectionHeader('Liguilla de Descenso','arrow_downward');
+      resDesc.forEach(f=>{
+        const gLabel=f.grupo?` · ${f.grupo}`:'';
+        html+=`<div class="fecha-block"><div class="fecha-lbl">Fecha ${f.fecha}${gLabel}</div>${matchCards(f.partidos)}</div>`;
+      });
+    }
+  }
+
+  if(!hasAny) html='<div class="empty">Sin resultados de la fase final aún</div>';
   return html;
 }
 
@@ -1549,8 +1913,9 @@ function renderTeam(divNombre,equipo){
       if(isPastEq&&!hasResultEq) return;
       if(isPastEq&&hasResultEq){
         const gl=p.gl,gv=p.gv;
-        const lw=gl>gv,vw=gv>gl;
-        pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color}">
+        const hasPenEq=p.pen_l!==undefined&&p.pen_v!==undefined;
+        const lw=hasPenEq?(p.pen_l>p.pen_v):(gl>gv), vw=hasPenEq?(p.pen_v>p.pen_l):(gv>gl);
+        pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color};flex-wrap:wrap">
           <div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>
           <div class="fixture-teams">
             <div class="fixture-team" style="${p.local===equipo?'font-weight:900;color:'+color:lw?'font-weight:700':''}">${p.local}</div>
@@ -1559,6 +1924,7 @@ function renderTeam(divNombre,equipo){
           </div>
           <div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>
           ${p.veedor?`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`:''}
+          ${hasPenEq?`<div style="width:100%;display:flex;justify-content:center;padding:4px 0 2px"><span style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;background:linear-gradient(135deg,#1a1f2e,#252b3d);color:#facc15;border:1px solid rgba(250,204,21,.3);border-radius:3px;padding:1px 7px">PEN ${p.pen_l}–${p.pen_v}</span></div>`:''}
         </div>`;
       } else {
         pxHTML+=`<div class="fixture-card" style="--accent:${color}">
