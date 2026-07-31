@@ -1295,13 +1295,15 @@ function buildGlobal(){
   let pxHTML='<div class="empty">Sin horarios cargados aún</div>';
   if(horarios.length){
     const byFase={};
+    const FASES_DESC=new Set(['Descenso','Fecha 2 - II']);
     horarios.forEach(p=>{
       const fase=p.fase||'General';
+      if(FASES_DESC.has(fase)&&p.gl!=null) return; // ocultar resultados viejos de descenso
       if(!byFase[fase]) byFase[fase]={};
       if(!byFase[fase][p.division]) byFase[fase][p.division]=[];
       byFase[fase][p.division].push(p);
     });
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
     const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
     const now=new Date();
     pxHTML='';
@@ -1412,7 +1414,7 @@ function buildGlobal(){
 
   <!-- Full panels below -->
   <div id="sec-horarios" class="panel section-gap">
-    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">Fase 3 &mdash; 4tos de Final &nbsp;·&nbsp; Horarios & Resultados</span></div>
+    <div class="panel-head"><span class="material-symbols-outlined">event</span><span class="panel-head-title">Fase Final &mdash; Semifinales &nbsp;·&nbsp; Horarios & Resultados</span></div>
     <div class="panel-body">${pxHTML}</div>
   </div>
 
@@ -1585,7 +1587,7 @@ function buildTablaPos(divNombre){
         <span>Empates de llaves se define en penales</span>
         <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
       </div>`;
-  let html=`<div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsAsc}</tbody></table>${legend}</div>`;
+  let html = usando4tos ? '' : `<div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsAsc}</tbody></table>${legend}</div>`;
 
   // Siempre mostrar descenso si hay grupos definidos (no depende de posiciones)
   const grupos=DATA.descensoGrupos&&DATA.descensoGrupos[divNombre];
@@ -1963,7 +1965,7 @@ function renderTeam(divNombre,equipo){
     const esLocal=p.local===equipo;
     const rival=esLocal?p.visitante:p.local;
     const faseLbl=p.fase||'Próximo';
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
     const faseDisplay=FASE_LABEL[faseLbl]||faseLbl;
     rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px;border-left:3px solid ${color}">
       <div style="flex:1;min-width:0">
