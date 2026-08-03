@@ -622,51 +622,65 @@ def procesar_todo(carpeta):
     ascenso_teams_list = {div: list(eq) for div, eq in ascenso_teams.items()}
     safe_print(f"[+] Equipos en Ascenso (4tos): { {d:len(e) for d,e in ascenso_teams.items()} }")
 
-    # Inyectar resultados 4tos desde Excel → horarios.json (para que Global muestre FIN)
+    # Inyectar resultados 4tos/semis desde Excel → horarios.json (para que Global muestre FIN)
     if res_4tos:
+        matched = set()
         for r in res_4tos:
             rl = simplificar_nombre(r['local']); rv = simplificar_nombre(r['visitante'])
-            div_r = r['division']; fase_r = r['fase']
+            div_r = r['division']
             for p in horarios:
-                if p.get('division') != div_r: continue
-                if r['fase'] not in p.get('fase','') and p.get('fase','') not in r['fase']: continue
+                if p.get('gl') is not None: continue  # ya tiene resultado
+                p_div = p.get('division')
+                # Permitir si división coincide O si el horario no tiene división (semifinales)
+                if p_div and p_div != div_r: continue
                 pl = simplificar_nombre(p['local']); pv = simplificar_nombre(p['visitante'])
                 if rl == pl and rv == pv:
-                    p['gl'] = r['gl']; p['gv'] = r['gv']; break
+                    p['gl'] = r['gl']; p['gv'] = r['gv']
+                    if p_div is None: p['division'] = div_r  # asignar división al horario
+                    matched.add(id(p)); break
                 elif rl == pv and rv == pl:
-                    p['gl'] = r['gv']; p['gv'] = r['gl']; break
-        safe_print(f"[+] Resultados 4tos inyectados en horarios: {len(res_4tos)}")
+                    p['gl'] = r['gv']; p['gv'] = r['gl']
+                    if p_div is None: p['division'] = div_r
+                    matched.add(id(p)); break
+        safe_print(f"[+] Resultados 4tos/semis inyectados en horarios: {len(matched)}")
 
     # Inyectar resultados descenso del Excel en horarios (para que aparezcan inline en Global)
+    FASES_DESCENSO = {'Descenso', 'Fecha 2 - II', 'Liguilla Descenso'}
     if res_descenso_excel:
-        # Divisiones con resultados en Excel
-        divs_con_excel = set(r['division'] for r in res_descenso_excel)
-        # Intentar inyectar en horarios existentes por nombre exacto
+        # Solo mostrar la jornada más reciente
+        max_jornada = max(r.get('fecha', 1) for r in res_descenso_excel)
+        res_desc_recientes = [r for r in res_descenso_excel if r.get('fecha', 1) == max_jornada]
         injected_desc = set()
         for p in horarios:
-            if p.get('fase','') != 'Descenso' or p.get('division','') not in divs_con_excel: continue
+            if p.get('fase','') not in FASES_DESCENSO: continue
+            if p.get('gl') is not None: continue
             pl = simplificar_nombre(p['local']); pv = simplificar_nombre(p['visitante'])
-            for r in res_descenso_excel:
-                if r['division'] != p.get('division',''): continue
+            for r in res_desc_recientes:
                 rl = simplificar_nombre(r['local']); rv = simplificar_nombre(r['visitante'])
                 if rl == pl and rv == pv:
                     p['gl'] = r['gl']; p['gv'] = r['gv']
+                    if p.get('division') is None: p['division'] = r['division']
                     if 'pen_l' in r: p['pen_l'] = r['pen_l']; p['pen_v'] = r['pen_v']
                     injected_desc.add((r['division'], r['local'], r['visitante']))
                     break
-        # Para los que no coincidieron: buscar horario mismo grupo para tomar fecha/hora/cancha/veedor
+                elif rl == pv and rv == pl:
+                    p['gl'] = r['gv']; p['gv'] = r['gl']
+                    if p.get('division') is None: p['division'] = r['division']
+                    if 'pen_l' in r: p['pen_l'] = r['pen_v']; p['pen_v'] = r['pen_l']
+                    injected_desc.add((r['division'], r['local'], r['visitante']))
+                    break
+        # Para resultados recientes sin horario coincidente: crear entrada sintética con datos del primer horario disponible
         horarios_desc_por_div = {}
         for p in horarios:
-            if p.get('fase','') != 'Descenso': continue
-            d = p.get('division','')
+            if p.get('fase','') not in FASES_DESCENSO: continue
+            d = p.get('division','') or ''
             if d not in horarios_desc_por_div: horarios_desc_por_div[d] = []
             horarios_desc_por_div[d].append(p)
-        for r in res_descenso_excel:
+        for r in res_desc_recientes:
             key = (r['division'], r['local'], r['visitante'])
             if key in injected_desc: continue
-            # Tomar fecha/hora/cancha/veedor del primer horario de esa división como referencia
             ref = next(iter(horarios_desc_por_div.get(r['division'], [])), None)
-            synth = {'fase':'Descenso','division':r['division'],'local':r['local'],'visitante':r['visitante'],
+            synth = {'fase':'Fecha 2 - II','division':r['division'],'local':r['local'],'visitante':r['visitante'],
                      'gl':r['gl'],'gv':r['gv'],
                      'hora': ref['hora'] if ref else 'Sin definir',
                      'dia':  ref['dia']  if ref else '',
@@ -675,9 +689,13 @@ def procesar_todo(carpeta):
             if ref and ref.get('veedor'): synth['veedor'] = ref['veedor']
             if 'pen_l' in r: synth['pen_l']=r['pen_l']; synth['pen_v']=r['pen_v']
             horarios.append(synth)
-        # Eliminar horarios descenso originales de divisiones cubiertas por Excel que quedaron sin resultado
-        horarios[:] = [p for p in horarios if not (p.get('fase','')=='Descenso' and p.get('division','') in divs_con_excel and p.get('gl') is None)]
-        safe_print(f"[+] Resultados descenso en horarios: {len(res_descenso_excel)} total")
+        # Eliminar TODOS los horarios de descenso sin resultado (fixtures desactualizados)
+        horarios[:] = [p for p in horarios if not (p.get('fase','') in FASES_DESCENSO and p.get('gl') is None)]
+        # Unificar fase de todos los descenso con resultado
+        for p in horarios:
+            if p.get('fase','') in FASES_DESCENSO and p.get('gl') is not None:
+                p['fase'] = 'Fecha 2 - II'
+        safe_print(f"[+] Descenso Global: jornada {max_jornada}, {len(res_desc_recientes)} partidos")
 
     # Descenso: preferir Excel si tiene datos, sino horarios.json
     if res_descenso_excel:
@@ -1295,15 +1313,13 @@ function buildGlobal(){
   let pxHTML='<div class="empty">Sin horarios cargados aún</div>';
   if(horarios.length){
     const byFase={};
-    const FASES_DESC=new Set(['Descenso','Fecha 2 - II']);
     horarios.forEach(p=>{
       const fase=p.fase||'General';
-      if(FASES_DESC.has(fase)&&p.gl!=null) return; // ocultar resultados viejos de descenso
       if(!byFase[fase]) byFase[fase]={};
       if(!byFase[fase][p.division]) byFase[fase][p.division]=[];
       byFase[fase][p.division].push(p);
     });
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Liguilla Descenso':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
     const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
     const now=new Date();
     pxHTML='';
@@ -1573,10 +1589,18 @@ function buildTablaPos(divNombre){
     </tr>`;
   };
   const usando4tos = asc4tos.length > 0;
+  const show8 = usando4tos && is3era;
   const rowsAsc = usando4tos
-    ? ascenso.filter(eq=>eq.clasificado).map((eq,i)=>buildRow(eq,i+1,true,false,false)).join('')
+    ? (show8
+        ? ascenso.map((eq,i)=>buildRow(eq,i+1,!!eq.clasificado,false,false)).join('')
+        : ascenso.filter(eq=>eq.clasificado).map((eq,i)=>buildRow(eq,i+1,true,false,false)).join(''))
     : ascenso.map((eq,i)=>buildRow(eq,i+1,i===0,i>0&&i<nAsc-rsk,i>=nAsc-rsk)).join('');
-  const legend = usando4tos
+  const legend = show8
+    ? `<div class="tbl-legend">
+        <span><span class="ldot" style="background:var(--gold,#c8a400)"></span>Semifinalistas</span>
+        <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  GF</span>
+      </div>`
+    : usando4tos
     ? `<div class="tbl-legend">
         <span><span class="ldot" style="background:var(--gold,#c8a400)"></span>4 clasificados a semifinales &nbsp;·&nbsp; Cruces: 1° vs 4° / 2° vs 3°</span>
       </div>`
@@ -1587,7 +1611,9 @@ function buildTablaPos(divNombre){
         <span>Empates de llaves se define en penales</span>
         <span><span class="ldot" style="background:#0dd"></span>Desempate: PTS  DG  GC  FP</span>
       </div>`;
-  let html = usando4tos ? '' : `<div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsAsc}</tbody></table>${legend}</div>`;
+  // 1era y 2da: solo mostrar grupos de descenso (sin tabla ascenso). 3era: siempre mostrar tabla
+  const ocultarAscenso = usando4tos && !is3era;
+  let html = ocultarAscenso ? '' : `<div class="pos-wrap"><table class="pos-table">${thead}<tbody>${rowsAsc}</tbody></table>${legend}</div>`;
 
   // Siempre mostrar descenso si hay grupos definidos (no depende de posiciones)
   const grupos=DATA.descensoGrupos&&DATA.descensoGrupos[divNombre];
@@ -1700,15 +1726,16 @@ function buildResultados(divNombre){
   let html='';
   let hasAny=false;
 
-  // ── Sección 4tos de Final ──────────────────────────────────
-  const res4 = (DATA.res4tos&&DATA.res4tos[divNombre])||[];
-  if(res4.length){
+  // ── Sección Semifinales ────────────────────────────────────
+  const FASES_SEMI={'Ida - Semi':'IDA','Vuelta - Semi':'VUELTA'};
+  const resSemi=(DATA.horarios||[]).filter(p=>p.division===divNombre&&FASES_SEMI[p.fase]&&p.gl!=null);
+  if(resSemi.length){
     hasAny=true;
-    html+=sectionHeader('4tos de Final','emoji_events');
-    const FASE_LBL={'Ida - 4tos':'IDA','Vuelta - 4tos':'VUELTA'};
-    res4.forEach(f=>{
-      const label=FASE_LBL[f.fase]||f.fase;
-      html+=`<div class="fecha-block"><div class="fecha-lbl">${label}</div>${matchCards(f.partidos)}</div>`;
+    html+=sectionHeader('Semifinales','emoji_events');
+    Object.entries(FASES_SEMI).forEach(([faseKey,label])=>{
+      const partidos=resSemi.filter(p=>p.fase===faseKey);
+      if(!partidos.length) return;
+      html+=`<div class="fecha-block"><div class="fecha-lbl">${label}</div>${matchCards(partidos)}</div>`;
     });
   }
 
@@ -1965,7 +1992,7 @@ function renderTeam(divNombre,equipo){
     const esLocal=p.local===equipo;
     const rival=esLocal?p.visitante:p.local;
     const faseLbl=p.fase||'Próximo';
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Liguilla Descenso':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
     const faseDisplay=FASE_LABEL[faseLbl]||faseLbl;
     rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px;border-left:3px solid ${color}">
       <div style="flex:1;min-width:0">
