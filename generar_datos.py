@@ -1323,7 +1323,13 @@ function buildGlobal(){
     const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
     const now=new Date();
     pxHTML='';
-    Object.entries(byFase).forEach(([fase,divs])=>{
+    // Pendientes primero, resultados después
+    const faseEntries=Object.entries(byFase).sort(([,da],[,db])=>{
+      const hasPendA=Object.values(da).some(ps=>ps.some(p=>p.gl==null));
+      const hasPendB=Object.values(db).some(ps=>ps.some(p=>p.gl==null));
+      return (hasPendA?0:1)-(hasPendB?0:1);
+    });
+    faseEntries.forEach(([fase,divs])=>{
       const label=FASE_LABEL[fase]||fase;
       const dates=FASE_DATES[fase]||'';
       pxHTML+=`<div style="margin-bottom:24px"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(135deg,rgba(200,16,46,.15),rgba(200,16,46,.05));border-left:3px solid var(--red);border-radius:0 8px 8px 0;margin-bottom:14px"><span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:var(--red)">${label}</span><span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;color:var(--text4)">${dates}</span></div>`;
