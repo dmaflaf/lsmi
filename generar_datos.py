@@ -1312,61 +1312,55 @@ function buildGlobal(){
   const horarios=DATA.horarios||[];
   let pxHTML='<div class="empty">Sin horarios cargados aún</div>';
   if(horarios.length){
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Fecha 3 - II':'Liguilla de Descenso','Liguilla Descenso':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA','Vuelta - Semi':'Semifinales — VUELTA'};
+    const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
+    const DIV_ORDER=['1era División','2da División','3era División 1','3era División 2'];
+    const LIGUILLA_DESCENSO='Liguilla de Descenso';
     const byFase={};
     horarios.forEach(p=>{
-      const fase=p.fase||'General';
-      if(!byFase[fase]) byFase[fase]={};
-      if(!byFase[fase][p.division]) byFase[fase][p.division]=[];
-      byFase[fase][p.division].push(p);
+      const label=FASE_LABEL[p.fase||'General']||p.fase||'General';
+      if(!byFase[label]) byFase[label]={};
+      if(!byFase[label][p.division]) byFase[label][p.division]=[];
+      byFase[label][p.division].push(p);
     });
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Liguilla Descenso':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
-    const FASE_DATES={'Ida - 4tos':'17 · 18 · 19 Jul','Vuelta - 4tos':'24 · 25 · 26 Jul'};
-    const now=new Date();
     pxHTML='';
-    // Pendientes primero, resultados después
-    const faseEntries=Object.entries(byFase).sort(([,da],[,db])=>{
+    // Pendientes primero, resultados después; Liguilla de Descenso siempre al final
+    const faseEntries=Object.entries(byFase).sort(([la,da],[lb,db])=>{
+      if(la===LIGUILLA_DESCENSO&&lb!==LIGUILLA_DESCENSO) return 1;
+      if(lb===LIGUILLA_DESCENSO&&la!==LIGUILLA_DESCENSO) return -1;
       const hasPendA=Object.values(da).some(ps=>ps.some(p=>p.gl==null));
       const hasPendB=Object.values(db).some(ps=>ps.some(p=>p.gl==null));
       return (hasPendA?0:1)-(hasPendB?0:1);
     });
-    faseEntries.forEach(([fase,divs])=>{
-      const label=FASE_LABEL[fase]||fase;
-      const dates=FASE_DATES[fase]||'';
-      pxHTML+=`<div style="margin-bottom:24px"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(135deg,rgba(200,16,46,.15),rgba(200,16,46,.05));border-left:3px solid var(--red);border-radius:0 8px 8px 0;margin-bottom:14px"><span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:var(--red)">${label}</span><span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;color:var(--text4)">${dates}</span></div>`;
-      Object.entries(divs).forEach(([div,parts])=>{
+    faseEntries.forEach(([label,divs])=>{
+      const dates=FASE_DATES[label]||'';
+      const divEntries=Object.entries(divs).sort(([da],[db])=>{
+        const ia=DIV_ORDER.indexOf(da),ib=DIV_ORDER.indexOf(db);
+        return (ia<0?99:ia)-(ib<0?99:ib);
+      });
+      let bodyHTML='';
+      divEntries.forEach(([div,parts])=>{
+        // Este panel es solo de horarios: se publican todos los partidos con horario real, sin marcador/resultado.
+        // La Liguilla de Descenso además descarta los resultados de jornadas ya jugadas (sin horario real, solo marcador).
+        const parts0=label===LIGUILLA_DESCENSO?parts.filter(p=>p.gl===undefined||p.gl===null):parts;
+        const parts_=parts0.filter(p=>p.hora!=='Sin definir'||p.cancha!=='Sin definir');
+        if(!parts_.length) return;
         const color=DC[div]||'#c8102e';
-        pxHTML+=`<div style="margin-bottom:18px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:${color};margin-bottom:8px;padding-left:2px">${div}</div>`;
-        parts.forEach(p=>{
+        bodyHTML+=`<div style="margin-bottom:18px"><div style="font-family:'Barlow Condensed',sans-serif;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:${color};margin-bottom:8px;padding-left:2px">${div}</div>`;
+        parts_.forEach(p=>{
           const horaTbd=p.hora==='Sin definir';
           const canchaTbd=p.cancha==='Sin definir';
-          const horaFmt=horaTbd?'00:00':p.hora.replace('h',':');
-          const matchDt=new Date(p.fecha_iso+'T'+horaFmt+':00');
-          const isPast=now>matchDt;
-          const hasResult=p.gl!==undefined&&p.gl!==null;
-          if(hasResult){
-            const gl=p.gl,gv=p.gv;
-            const hasPen=p.pen_l!==undefined&&p.pen_v!==undefined;
-            const lw=hasPen?(p.pen_l>p.pen_v):(gl>gv),vw=hasPen?(p.pen_v>p.pen_l):(gv>gl);
-            const penLabel=hasPen?`<span style="font-family:'Barlow Condensed',sans-serif;font-size:9px;font-weight:800;letter-spacing:1px;background:linear-gradient(135deg,#1a1f2e,#252b3d);color:#facc15;border:1px solid rgba(250,204,21,.3);border-radius:3px;padding:1px 7px;margin-top:2px;display:inline-block">PEN ${p.pen_l}–${p.pen_v}</span>`:'';
-            pxHTML+=`<div class="fixture-card resultado-card" style="--accent:${color};flex-wrap:wrap">`;
-            pxHTML+=`<div class="fixture-time"><div style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:800;letter-spacing:1px;color:var(--green);background:var(--green-light);padding:2px 6px;border-radius:4px">FIN</div><div class="fixture-dia">${p.dia}</div></div>`;
-            pxHTML+=`<div class="fixture-teams"><div class="fixture-team" style="${lw?'font-weight:900;color:'+color:''}">${p.local}</div><div class="fixture-vs" style="font-family:'Barlow Condensed',sans-serif;font-size:19px;font-weight:900;color:var(--gray);background:linear-gradient(135deg,var(--surf2),var(--surf3));border:1px solid var(--border2);padding:4px 14px;border-radius:8px;min-width:58px;text-align:center;letter-spacing:2px">${gl} – ${gv}</div><div class="fixture-team" style="${vw?'font-weight:900;color:'+color:''}">${p.visitante}</div></div>`;
-            if(!canchaTbd) pxHTML+=`<div class="fixture-cancha"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
-            if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
-            if(hasPen) pxHTML+=`<div style="width:100%;display:flex;justify-content:center;padding:4px 0 2px">${penLabel}</div>`;
-            pxHTML+=`</div>`;
-          } else {
-            pxHTML+=`<div class="fixture-card" style="--accent:${color}">`;
-            pxHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
-            pxHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
-            pxHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
-            if(p.veedor) pxHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
-            pxHTML+=`</div>`;
-          }
+          bodyHTML+=`<div class="fixture-card" style="--accent:${color}">`;
+          bodyHTML+=`<div class="fixture-time"><div class="fixture-hora${horaTbd?' tbd':''}">${p.hora}</div><div class="fixture-dia">${p.dia}</div></div>`;
+          bodyHTML+=`<div class="fixture-teams"><div class="fixture-team">${p.local}</div><div class="fixture-vs">VS</div><div class="fixture-team">${p.visitante}</div></div>`;
+          bodyHTML+=`<div class="fixture-cancha${canchaTbd?' tbd':''}"><span class="material-symbols-outlined" style="font-size:13px">location_on</span>${p.cancha}</div>`;
+          if(p.veedor) bodyHTML+=`<div class="fixture-veedor"><span class="material-symbols-outlined" style="font-size:13px">badge</span>${p.veedor}</div>`;
+          bodyHTML+=`</div>`;
         });
-        pxHTML+=`</div>`; // cierra div-division
+        bodyHTML+=`</div>`; // cierra div-division
       });
-      pxHTML+=`</div>`; // cierra div-fase
+      if(!bodyHTML) return; // nada que mostrar en este bloque (p.ej. Descenso sin pendientes)
+      pxHTML+=`<div style="margin-bottom:24px"><div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:linear-gradient(135deg,rgba(200,16,46,.15),rgba(200,16,46,.05));border-left:3px solid var(--red);border-radius:0 8px 8px 0;margin-bottom:14px"><span style="font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:900;letter-spacing:2px;text-transform:uppercase;color:var(--red)">${label}</span><span style="font-family:'Barlow Condensed',sans-serif;font-size:10px;font-weight:700;color:var(--text4)">${dates}</span></div>`+bodyHTML+`</div>`; // cierra div-fase
     });
   }
 
@@ -1998,7 +1992,7 @@ function renderTeam(divNombre,equipo){
     const esLocal=p.local===equipo;
     const rival=esLocal?p.visitante:p.local;
     const faseLbl=p.fase||'Próximo';
-    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Liguilla Descenso':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA'};
+    const FASE_LABEL={'Ida - 4tos':'4tos de Final — IDA','Vuelta - 4tos':'4tos de Final — VUELTA','Descenso':'Liguilla de Descenso','Fecha 2 - II':'Liguilla de Descenso','Fecha 3 - II':'Liguilla de Descenso','Liguilla Descenso':'Liguilla de Descenso','Ida - Semi':'Semifinales — IDA','Vuelta - Semi':'Semifinales — VUELTA'};
     const faseDisplay=FASE_LABEL[faseLbl]||faseLbl;
     rivalesHTML+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surf2);margin-bottom:5px;border-left:3px solid ${color}">
       <div style="flex:1;min-width:0">
